@@ -6,7 +6,7 @@ Colocar o password, e então:
 
 ./setup1.sh
 
-Após isto, adicionar chave SSH no bitbucket e executar:
+Após isto, fechar o terminal e abrir um novo, adicionar chave SSH no bitbucket e executar:
 
 ./setup2.sh
 

@@ -21,6 +21,7 @@ source ~/.bashrc
 git clone https://github.com/rbenv/ruby-build.git ~/.rbenv/plugins/ruby-build
 rbenv install 2.6.2
 rbenv global 2.6.2
+rbenv rehash
 echo "gem: --no-document" > ~/.gemrc
 gem install bundler
 gem install rails

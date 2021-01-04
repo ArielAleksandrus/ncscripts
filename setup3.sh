@@ -29,4 +29,4 @@ sudo ln -s /etc/nginx/sites-available/ncommerce /etc/nginx/sites-enabled/ncommer
 
 # Configurar variaveis de ambiente para ncommerce
 curl https://ncommerce.app:3001/setup/env/test?token=$1 > ~/NCommerce/ncommerce_api/.env.production
-sudo bash -c 'cat .env.production >> /etc/environment' && sudo reboot
+cd ~/NCommerce/ncommerce_api && sudo bash -c 'cat .env.production >> /etc/environment' && sudo reboot
