@@ -13,7 +13,7 @@ cd ~/NCommerce/ncommerce_api && bundle install
 sudo mysql < ~/NCommerce/ncommerce_api/essentials/setup_scripts/mysql-setup.sql
 
 # Install additional libs
-sudo cp -r ~/NCommerce/ncommerce_api/essentials/libmp2032_4.4.0.5_Debian8_x64/installusr/* /usr/
+sudo cp -r ~/NCommerce/ncommerce_api/essentials/libmp2032_4.4.0.5_Debian8_x64/install/usr/* /usr/
 
 cd ~/NCommerce/ncommerce_api/essentials && unzip UbuntuDriverCUPS.zip && cd UbuntuDriverCUPS && \
 sudo dpkg -i bematech-driver_1.3.0-1_amd64_Ubuntu_17.deb && \
