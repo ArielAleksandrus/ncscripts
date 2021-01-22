@@ -13,7 +13,7 @@ Após isto, fechar o terminal e abrir um novo, deixar o sudo ativo com "sudo ls"
 Após isto, usar o comando "ngrok authtoken <token do ngrok>"
 Então, pode-se usar o comando
 
-./setup3.sh <token do ncommerce aqui>
+./setup3.sh <token do ncommerce aqui> <username do linux aqui>
 
 O ubuntu deverá reiniciar. Confira o arquivo ~/.ngrok2/ngrok.yml e o ~/NCommerce/ncommerce_api/.env.production
 
