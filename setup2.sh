@@ -6,6 +6,14 @@ git clone git@bitbucket.org:Aleksandrus/ncommerce.git && \
 git clone git@bitbucket.org:Aleksandrus/sefaz-chrome-extension.git && \
 git clone git@bitbucket.org:Aleksandrus/nfce.git
 
+# Install Ruby and Rails
+rbenv install 2.6.2 && rbenv global 2.6.2
+echo "gem: --no-document" > ~/.gemrc
+gem install bundler
+gem install rails
+gem env home
+rbenv rehash
+
 # Setup Rails project
 cd ~/NCommerce/ncommerce_api && bundle install
 
