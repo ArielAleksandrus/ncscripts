@@ -23,9 +23,8 @@ sudo mysql < ~/NCommerce/ncommerce_api/essentials/setup_scripts/mysql-setup.sql
 # Install additional libs
 sudo cp -r ~/NCommerce/ncommerce_api/essentials/libmp2032_4.4.0.5_Debian8_x64/install/usr/* /usr/
 
-cd ~/NCommerce/ncommerce_api/essentials && unzip UbuntuDriverCUPS.zip && cd UbuntuDriverCUPS && \
-sudo dpkg -i bematech-driver_1.3.0-1_amd64_Ubuntu_17.deb && \
-sudo dpkg -i bematech-driver_2.0.0.4-0_amd64.deb
+cd ~/NCommerce/ncommerce_api/essentials && unzip Driver_CUPS_Ubuntu_18e20.zip && \
+sudo dpkg -i bematech-driver_2.0.0.6-1_amd64.deb
 
 cd ~/NCommerce/ncommerce_api/essentials && unzip ngrok-stable-linux-amd64.zip && sudo mv ngrok /usr/bin/
 
