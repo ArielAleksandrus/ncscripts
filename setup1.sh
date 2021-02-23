@@ -13,17 +13,11 @@ export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
 nvm install v12.8.1
 
-# Install Ruby and Rails
+# Install Rbenv
 git clone https://github.com/rbenv/rbenv.git ~/.rbenv
 echo 'export PATH="$HOME/.rbenv/bin:$PATH"' >> ~/.bashrc
 echo 'eval "$(rbenv init -)"' >> ~/.bashrc
-source ~/.bashrc && git clone https://github.com/rbenv/ruby-build.git ~/.rbenv/plugins/ruby-build && \
-rbenv install 2.6.2 && rbenv global 2.6.2
-echo "gem: --no-document" > ~/.gemrc
-gem install bundler
-gem install rails
-gem env home
-rbenv rehash
+source ~/.bashrc && git clone https://github.com/rbenv/ruby-build.git ~/.rbenv/plugins/ruby-build
 
 sudo apt autoremove -y
 
