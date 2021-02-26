@@ -7,7 +7,7 @@ git clone git@bitbucket.org:Aleksandrus/sefaz-chrome-extension.git && \
 git clone git@bitbucket.org:Aleksandrus/nfce.git
 
 # Install Ruby and Rails
-rbenv install 2.6.2 && rbenv global 2.6.2
+rbenv install 2.6.6 && rbenv global 2.6.6
 echo "gem: --no-document" > ~/.gemrc
 gem install bundler
 gem install rails
