@@ -6,6 +6,12 @@ Colocar o password, e então:
 
 ./setup1.sh
 
+Em seguida, configurar o Dropbox:
+~/.dropbox-dist/dropboxd
+
+Iniciar o dropbox quando o sistema iniciar:
+https://askubuntu.com/a/557818/323337
+
 Após isto, fechar o terminal e abrir um novo, deixar o sudo ativo com "sudo ls" novamente, adicionar chave SSH no bitbucket e executar:
 
 ./setup2.sh
