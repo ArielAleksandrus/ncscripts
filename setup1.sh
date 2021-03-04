@@ -21,6 +21,9 @@ source ~/.bashrc && git clone https://github.com/rbenv/ruby-build.git ~/.rbenv/p
 
 sudo apt autoremove -y
 
+# Install Dropbox
+cd ~ && wget -O - "https://www.dropbox.com/download?plat=lnx.x86_64" | tar xzf -
+
 # Generate SSH key-pair
 SSH_FILE=~/.ssh/id_rsa
 
