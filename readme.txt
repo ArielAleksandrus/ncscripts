@@ -17,12 +17,19 @@ Após isto, fechar o terminal e abrir um novo, deixar o sudo ativo com "sudo ls"
 ./setup2.sh
 
 Após isto, usar o comando "ngrok authtoken <token do ngrok>"
-Então, pode-se usar o comando
+Então, pode-se usar o comando  (requer "sudo ls" antes)
 
 ./setup3.sh <token do ncommerce aqui> <username do linux aqui>
 
 O ubuntu deverá reiniciar. Confira o arquivo ~/.ngrok2/ngrok.yml e o ~/NCommerce/ncommerce_api/.env.production
 
-Agora, resta criar o banco de dados e as tarefas cron
+Agora, resta criar o banco de dados e as tarefas cron (requer "sudo ls" antes)
 
 ./setup4.sh
+
+Após isto, realizar os seguintes procedimentos:
+  1. colocar ip fixo na máquina do cliente
+  2. instalar impressoras
+  3. adicionar extensão ncommerce no chromium (extensões -> modo desenvolvedor ON -> carregar sem compactar /home/<usuario>/NCommerce/sefaz-chrome-extension -> Fixar no navegador)
+  4. reiniciar o pc e testar o acesso remoto
+  5. setar configurações de nota fiscal (exclusivo NCommerce)
