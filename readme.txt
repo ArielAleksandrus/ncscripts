@@ -33,3 +33,4 @@ Após isto, realizar os seguintes procedimentos:
   3. adicionar extensão ncommerce no chromium (extensões -> modo desenvolvedor ON -> carregar sem compactar /home/<usuario>/NCommerce/sefaz-chrome-extension -> Fixar no navegador)
   4. reiniciar o pc e testar o acesso remoto
   5. setar configurações de nota fiscal (exclusivo NCommerce)
+  6. instalar certificado no navegador (exclusivo ncommerce)
