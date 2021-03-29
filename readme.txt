@@ -1,8 +1,10 @@
-Depois do Ubuntu 20 instalado, deixar o password salvo para comando sudo:
+Depois do Ubuntu 20 instalado, execute os seguintes scripts.
 
-sudo ls
-
-Colocar o password, e então:
+ATENÇÃO: antes de todos os scripts, dê um "sudo ls" para deixar o "sudo" permitido, mas JAMAIS use o sudo junto com o script
+EXEMPLO:
+				- errado: "sudo ./script..."
+				- CORRETO: "sudo ls"
+				           "./script..."
 
 ./setup1.sh
 
@@ -14,7 +16,7 @@ https://askubuntu.com/a/557818/323337
 
 Após isto, fechar o terminal e abrir um novo, deixar o sudo ativo com "sudo ls" novamente, adicionar chave SSH no bitbucket e executar:
 
-./setup2.sh
+./setup2.sh <username do linux aqui>
 
 Após isto, usar o comando "ngrok authtoken <token do ngrok>"
 Então, pode-se usar o comando  (requer "sudo ls" antes)

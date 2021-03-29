@@ -1,3 +1,11 @@
+
+if test -n "${1-}"; then
+  echo "linux user present. Proceeding..."
+else
+  echo "FAILED: linux user is not set! use './setup2.sh <username here>"
+  exit 1
+fi
+
 # Agora que o SSH foi adicionado no bitbucket, vamos copiar o codigo
 ssh-keyscan bitbucket.org >> ~/.ssh/known_hosts
 cd ~ && mkdir NCommerce && cd NCommerce && \
@@ -44,3 +52,6 @@ sudo apt-get update
 sudo apt-get install -y passenger passenger-dev
 sudo apt-get install -y libnginx-mod-http-passenger
 sudo cp ~/.rbenv/shims/ruby /usr/bin/ruby
+
+# Configurar passenger
+echo -e "passenger_ruby /home/$1/.rbenv/shims/ruby;\npassenger_root /usr/lib/ruby/vendor_ruby/phusion_passenger/locations.ini;" | sudo tee /etc/nginx/conf.d/mod-http-passenger.conf
