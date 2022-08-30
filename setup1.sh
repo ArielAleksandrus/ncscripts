@@ -13,6 +13,9 @@ export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
 nvm install v12.8.1
 
+# Install expose
+curl -s https://expose.sh/sh/install-linux.sh | sudo bash
+
 # Install Rbenv
 git clone https://github.com/rbenv/rbenv.git ~/.rbenv
 echo 'export PATH="$HOME/.rbenv/bin:$PATH"' >> ~/.bashrc
