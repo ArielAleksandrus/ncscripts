@@ -36,3 +36,14 @@ Após isto, realizar os seguintes procedimentos:
   4. reiniciar o pc e testar o acesso remoto
   5. setar configurações de nota fiscal (exclusivo NCommerce)
   6. instalar certificado no navegador (exclusivo ncommerce)
+
+PARA TABLETS DE AUTOATENDIMENTO:
+  1. Para cada tablet, habilitar a flag "Insecure origins treated as secure"
+  A flag pode ser habilitada neste link em cada tablet:
+    chrome://flags/#unsafely-treat-insecure-origin-as-secure
+
+  verificar o link:
+    https://medium.com/@Carmichaelize/enabling-the-microphone-camera-in-chrome-for-local-unsecure-origins-9c90c3149339
+
+  2. Adicionar os possíveis IP's do servidor com a devida porta (no caso, 4200). Por exemplo:
+    http://192.168.1.172:4200
