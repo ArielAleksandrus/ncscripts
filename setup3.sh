@@ -1,3 +1,4 @@
+# DEPRECATED: nao usaremos mais ngrok
 # Agora que as dependências foram instaladas, vamos configurar o NCommerce
 #NGROK_FILE=~/.ngrok2/ngrok.yml
 
@@ -22,9 +23,12 @@ else
   exit 1
 fi
 
-# DEPRECATED: ngrok usage will be removed, and replaced with tunnel.nlabs.live
-# Configurar ngrok
-cat ~/NCommerce/ncommerce_api/essentials/ngrok-files/example.yml >> ~/.ngrok2/ngrok.yml
+# DEPRECATED: nao usaremos mais ngrok
+#cat ~/NCommerce/ncommerce_api/essentials/ngrok-files/example.yml >> ~/.ngrok2/ngrok.yml
+
+# Adicionar tunnel.nlabs.live e nlabs.live ao known hosts
+ssh-keyscan -H nlabs.live >> ~/.ssh/known_hosts
+ssh-keyscan -H tunnel.nlabs.live >> ~/.ssh/known_hosts
 
 # Adicionar keep alive no tunnel do nlabs
 cat ~/NCommerce/ncommerce_api/essentials/ssh_config.txt >> ~/.ssh/config

@@ -14,11 +14,12 @@ Em seguida, configurar o Dropbox:
 Iniciar o dropbox quando o sistema iniciar:
 https://askubuntu.com/a/557818/323337
 
-Após isto, fechar o terminal e abrir um novo, deixar o sudo ativo com "sudo ls" novamente, adicionar chave SSH no bitbucket e executar:
+Após isto, fechar o terminal e abrir um novo, deixar o sudo ativo com "sudo ls" novamente.
+
+!!! ADICIONAR CHAVE SSH no bitbucket e no servidor Nlabs !!! e executar:
 
 ./setup2.sh <username do linux aqui>
 
-Após isto, usar o comando "ngrok authtoken <token do ngrok>"
 Então, pode-se usar o comando  (requer "sudo ls" antes)
 
 ./setup3.sh <token do ncommerce aqui> <username do linux aqui>
