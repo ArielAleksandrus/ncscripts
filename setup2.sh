@@ -28,21 +28,30 @@ cd ~/NCommerce/ncommerce_api && bundle install
 # Setup MYSQL
 sudo mysql < ~/NCommerce/ncommerce_api/essentials/setup_scripts/mysql-setup.sql
 
-# Install additional libs
+# Install 80mm-roll printer libs
 sudo cp -r ~/NCommerce/ncommerce_api/essentials/libmp2032_4.4.0.5_Debian8_x64/install/usr/* /usr/
 
 cd ~/NCommerce/ncommerce_api/essentials && unzip Driver_CUPS_Ubuntu_18e20.zip && \
 sudo dpkg -i bematech-driver_2.0.0.6-1_amd64.deb
 
+# Install ngrok (OBSOLETE)
 cd ~/NCommerce/ncommerce_api/essentials && unzip ngrok-stable-linux-amd64.zip && sudo mv ngrok /usr/bin/
 
+# Install phantomjs to calculate page height for printing
 cd ~/NCommerce/ncommerce_api/essentials && unzip phantomjs-2.1.1-linux-x86_64.zip && \
 sudo cp phantomjs-2.1.1-linux-x86_64/bin/phantomjs /usr/bin/
 
+# Install printer and teamviewer
 cd ~/NCommerce/ncommerce_api/essentials && \
 sudo dpkg -i prince_11.4-1_ubuntu18.04_amd64.deb
 sudo dpkg -i teamviewer_15.13.6_amd64.deb
 sudo apt install --fix-broken -y
+
+# Install AnyDesk
+wget -qO - https://keys.anydesk.com/repos/DEB-GPG-KEY | sudo apt-key add -
+echo "deb http://deb.anydesk.com/ all main" | sudo tee -a /etc/apt/sources.list.d/anydesk-stable.list
+sudo apt update
+sudo apt install -y anydesk
 
 # Install passenger
 sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 561F9B9CAC40B2F7
