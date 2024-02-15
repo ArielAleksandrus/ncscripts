@@ -8,6 +8,10 @@ EXEMPLO:
 
 ./setup1.sh
 
+Após isto, fechar o terminal e abrir um novo, deixar o sudo ativo com "sudo ls" novamente
+
+./setup2.sh
+
 Em seguida, configurar o Dropbox:
 ~/.dropbox-dist/dropboxd
 
@@ -18,17 +22,17 @@ Após isto, fechar o terminal e abrir um novo, deixar o sudo ativo com "sudo ls"
 
 !!! ADICIONAR CHAVE SSH no bitbucket e no servidor Nlabs !!! e executar:
 
-./setup2.sh <username do linux aqui>
+./setup3.sh <username do linux aqui>
 
 Então, pode-se usar o comando  (requer "sudo ls" antes)
 
-./setup3.sh <token do ncommerce aqui> <username do linux aqui>
+./setup4.sh <token do ncommerce aqui> <username do linux aqui>
 
 O ubuntu deverá reiniciar. Confira o arquivo ~/.ngrok2/ngrok.yml e o ~/NCommerce/ncommerce_api/.env.production
 
 Agora, resta criar o banco de dados e as tarefas cron (requer "sudo ls" antes)
 
-./setup4.sh
+./setup5.sh
 
 Após isto, realizar os seguintes procedimentos:
   1. colocar ip fixo na máquina do cliente

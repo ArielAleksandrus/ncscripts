@@ -1,14 +1,49 @@
-# Create, migrate and seed database
-cd ~/NCommerce/ncommerce_api && bundle exec rake db:create db:migrate db:seed
-sudo systemctl reload nginx
+# DEPRECATED: nao usaremos mais ngrok
+# Agora que as dependências foram instaladas, vamos configurar o NCommerce
+#NGROK_FILE=~/.ngrok2/ngrok.yml
 
-USERNAME="$(whoami)"
+#if test -f "$NGROK_FILE" ; then
+#  echo "ngrok file present. Proceeding..."
+#else
+#  echo "FAILED: ngrok file is not set! use 'ngrok authtoken < ngrok token here>'"
+#  exit 1
+#fi
 
-# Create the cron jobs
-# Usage of NGROK is DEPRECATED.
-#(crontab -l 2>/dev/null; echo "@reboot /home/${USERNAME}/NCommerce/ncommerce_api/vendor/scripts/start_ngrok.sh /home/${USERNAME}/NCommerce/ncommerce_api | at now + 2 minutes\n@monthly /home/${USERNAME}/NCommerce/ncommerce_api/vendor/scripts/backup_nfce.sh") | crontab -
-#sudo su <<EOF
-(crontab -l 2>/dev/null; echo -e "* * * * * /home/${USERNAME}/NCommerce/ncommerce_api/vendor/scripts/chown_files.sh /home/${USERNAME}/NCommerce/ncommerce_api\n* * * * * ( sleep 30; /home/${USERNAME}/NCommerce/ncommerce_api/vendor/scripts/chown_files.sh /home/${USERNAME}/NCommerce/ncommerce_api )\n30 18 * * 2 /home/${USERNAME}/NCommerce/ncommerce_api/vendor/scripts/backup.sh /home/${USERNAME}/NCommerce/ncommerce_api\n30 17 * * 4 /home/${USERNAME}/NCommerce/ncommerce_api/vendor/scripts/backup.sh /home/${USERNAME}/NCommerce/ncommerce_api\n30 18 * * 6 /home/${USERNAME}/NCommerce/ncommerce_api/vendor/scripts/backup.sh /home/${USERNAME}/NCommerce/ncommerce_api") | crontab -
-EOF
+if test -n "${1-}"; then
+  echo "ncommerce token present. Proceeding..."
+else
+  echo "FAILED: ncommerce token is not set! use './setup3.sh <ncommerce token here> <username here>"
+  exit 1
+fi
 
-sudo service cron reload
+if test -n "${2-}"; then
+  echo "linux user present. Proceeding..."
+else
+  echo "FAILED: linux user is not set! use './setup3.sh <ncommerce token here> <username here>"
+  exit 1
+fi
+
+# DEPRECATED: nao usaremos mais ngrok
+#cat ~/NCommerce/ncommerce_api/essentials/ngrok-files/example.yml >> ~/.ngrok2/ngrok.yml
+
+# Adicionar tunnel.nlabs.live e nlabs.live ao known hosts
+ssh-keyscan -H nlabs.live >> ~/.ssh/known_hosts
+ssh-keyscan -H tunnel.nlabs.live >> ~/.ssh/known_hosts
+
+# Adicionar keep alive no tunnel do nlabs
+cat ~/NCommerce/ncommerce_api/essentials/ssh_config.txt >> ~/.ssh/config
+cd ~/.ssh && sudo chmod 600 ./config
+
+# Configurar nginx para ncommerce-api (back end)
+curl https://ncommerce.app:3001/setup/nginx_back/$2?token=$1 > /tmp/ncommerce-api
+sudo cp /tmp/ncommerce-api /etc/nginx/sites-available/ncommerce-api
+sudo ln -s /etc/nginx/sites-available/ncommerce-api /etc/nginx/sites-enabled/ncommerce-api
+
+# Configurar nginx para ncommerce (front end)
+curl https://ncommerce.app:3001/setup/nginx_front/$2?token=$1 > /tmp/ncommerce
+sudo cp /tmp/ncommerce /etc/nginx/sites-available/ncommerce
+sudo ln -s /etc/nginx/sites-available/ncommerce /etc/nginx/sites-enabled/ncommerce
+
+# Configurar variaveis de ambiente para ncommerce
+curl https://ncommerce.app:3001/setup/env/$2?token=$1 > ~/NCommerce/ncommerce_api/.env.production
+cd ~/NCommerce/ncommerce_api && sudo bash -c 'cat .env.production >> /etc/environment' && sudo reboot
