@@ -17,7 +17,7 @@ git clone git@bitbucket.org:Aleksandrus/nfce.git
 # Install Ruby and Rails
 rbenv install 2.6.6 && rbenv global 2.6.6
 echo "gem: --no-document" > ~/.gemrc
-gem install bundler
+gem install bundler -v 2.4.22
 gem install rails -v 6
 gem env home
 rbenv rehash
