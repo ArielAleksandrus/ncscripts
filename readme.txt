@@ -1,4 +1,6 @@
-Depois do Ubuntu 20 instalado, execute os seguintes scripts.
+Depois do Ubuntu 20 instalado, baixe e execute os seguintes scripts:
+
+https://github.com/ArielAleksandrus/ncscripts/archive/refs/heads/master.zip
 
 ATENÇÃO: antes de todos os scripts, dê um "sudo ls" para deixar o "sudo" permitido, mas JAMAIS use o sudo junto com o script
 EXEMPLO:
