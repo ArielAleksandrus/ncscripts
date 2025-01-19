@@ -47,6 +47,14 @@ sudo dpkg -i prince_11.4-1_ubuntu18.04_amd64.deb
 sudo dpkg -i teamviewer_15.13.6_amd64.deb
 sudo apt install --fix-broken -y
 
+# Add Dropbox to startup
+mkdir -p ~/.config/autostart
+cd ~/NCommerce/ncommerce_api/essentials && \
+sed -i "s/COMPUTERUSER/$1/g" dropboxd.desktop && \
+cp dropboxd.desktop ~/.config/autostart/dropboxd.desktop && \
+sed -i "s/$1/COMPUTERUSER/g" dropboxd.desktop
+
+
 # Install AnyDesk
 wget -qO - https://keys.anydesk.com/repos/DEB-GPG-KEY | sudo apt-key add -
 echo "deb http://deb.anydesk.com/ all main" | sudo tee -a /etc/apt/sources.list.d/anydesk-stable.list

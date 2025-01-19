@@ -17,8 +17,8 @@ Após isto, fechar o terminal e abrir um novo, deixar o sudo ativo com "sudo ls"
 Em seguida, configurar o Dropbox:
 ~/.dropbox-dist/dropboxd
 
-Iniciar o dropbox quando o sistema iniciar:
-https://askubuntu.com/a/557818/323337
+!!!DESMARCAR PASTAS DE TERCEIROS NA SINCRONIZACAO!!!
+Abrir o app Dropbox, ir em Preferences, Sync, Select Folders
 
 Após isto, fechar o terminal e abrir um novo, deixar o sudo ativo com "sudo ls" novamente.
 
