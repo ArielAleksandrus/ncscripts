@@ -32,6 +32,7 @@ Então, pode-se usar o comando  (requer "sudo ls" antes)
 
 O ubuntu deverá reiniciar. Confira o arquivo ~/.ngrok2/ngrok.yml e o ~/NCommerce/ncommerce_api/.env.production
 
+!!!! INSERIR A VARIAVEL COMPUTER_PASSWORD NO .env.production E NO /etc/environment !!!!
 Agora, resta criar o banco de dados e as tarefas cron (requer "sudo ls" antes)
 
 ./setup5.sh
