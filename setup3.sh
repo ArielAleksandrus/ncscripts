@@ -54,6 +54,14 @@ sed -i "s/COMPUTERUSER/$1/g" dropboxd.desktop && \
 cp dropboxd.desktop ~/.config/autostart/dropboxd.desktop && \
 sed -i "s/$1/COMPUTERUSER/g" dropboxd.desktop
 
+# Add Restauracao (backup restoration script) to Desktop
+cd ~/NCommerce/ncommerce_api/essentials && \
+sed -i "s/COMPUTERUSER/$1/g" restauracao.desktop && \
+cp restauracao.desktop ~/Desktop/Restauracao.desktop && \
+sed -i "s/$1/COMPUTERUSER/g" restauracao.desktop && \
+gio set ~/Desktop/Restauracao.desktop metadata::trusted true && \
+chmod a+x ~/Desktop/Restauracao.desktop
+
 
 # Install AnyDesk
 wget -qO - https://keys.anydesk.com/repos/DEB-GPG-KEY | sudo apt-key add -
