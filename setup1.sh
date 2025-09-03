@@ -6,3 +6,6 @@ mysql-server libmysqlclient-dev redis-server \
 bison libssl-dev libyaml-dev libreadline-dev zlib1g-dev libncurses5-dev libffi-dev libgdbm6 libgdbm-dev \
 nginx dirmngr gnupg samba smbclient libsmbclient python3-smbc htop
 
+# Use JAVA 17
+sudo apt install -y openjdk-17-jre openjdk-17-jdk
+sudo update-java-alternatives --set "/usr/lib/jvm/java-1.17.0-openjdk-amd64"
