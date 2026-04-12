@@ -226,6 +226,7 @@ else
   sudo bash -c "cat /home/${USER}/NCommerce/ncommerce_api/.env.production >> /etc/environment"
 
   cd ~/NCommerce/ncommerce_api
+  sudo mysql < ./essentials/setup_scripts/mysql-setup.sql
   bundle exec rake db:create db:migrate db:seed RAILS_ENV=production
   sudo systemctl reload nginx
 
