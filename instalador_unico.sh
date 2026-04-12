@@ -1,7 +1,7 @@
 #!/bin/bash
 # =====================================================
 # INSTALADOR ÚNICO NCOMMERCE - Ubuntu 25 (RESUMÍVEL + ROBUSTO)
-# Não duplica linhas • Pula clones já feitos • Corrige dependências
+# ✅ Não duplica rbenv • ✅ Pula clones já feitos • ✅ Corrige dependências
 # =====================================================
 
 set -e
@@ -85,7 +85,6 @@ if is_step_done 3; then
 else
   echo "PASSO 3/7: Rbenv + Dropbox + chave SSH"
 
-  # Evita duplicar linhas no .bashrc
   if ! grep -q 'rbenv/bin' ~/.bashrc; then
     echo 'export PATH="$HOME/.rbenv/bin:$PATH"' >> ~/.bashrc
   fi
@@ -103,7 +102,6 @@ else
 
   cd ~ && wget -O - "https://www.dropbox.com/download?plat=lnx.x86_64" | tar xzf -
 
-  # Chave SSH
   mkdir -p ~/.ssh
   if [ ! -f ~/.ssh/id_rsa ]; then
     ssh-keygen -t rsa -b 4096 -N "" -f ~/.ssh/id_rsa -q
@@ -128,16 +126,21 @@ else
   echo "PASSO 4/7: Clonando repositórios (pula se já existir)"
   cd ~ && mkdir -p NCommerce && cd NCommerce
 
-  [ ! -d "ncommerce_api" ] && git clone git@bitbucket.org:Aleksandrus/ncommerce_api.git || true
-  [ ! -d "ncommerce" ] && git clone git@bitbucket.org:Aleksandrus/ncommerce.git || true
-  [ ! -d "sefaz-chrome-extension" ] && git clone git@bitbucket.org:Aleksandrus/sefaz-chrome-extension.git || true
-  [ ! -d "nfce" ] && git clone git@bitbucket.org:Aleksandrus/nfce.git || true
+  # Verificação mais robusta
+  for repo in ncommerce_api ncommerce sefaz-chrome-extension nfce; do
+    if [ ! -d "$repo/.git" ]; then
+      echo "Clonando $repo..."
+      git clone "git@bitbucket.org:Aleksandrus/$repo.git" || true
+    else
+      echo "✅ $repo já existe. Pulando clone."
+    fi
+  done
 
   mark_step_done 4
 fi
 echo
 
-# ====================== PASSO 5/7 ======================
+# ====================== PASSO 5/7 a 7/7 (mantidos iguais) ======================
 if is_step_done 5; then
   echo "PASSO 5/7 já concluído anteriormente. Pulando..."
 else
@@ -155,7 +158,6 @@ else
 fi
 echo
 
-# ====================== PASSO 6/7 ======================
 if is_step_done 6; then
   echo "PASSO 6/7 já concluído anteriormente. Pulando..."
 else
@@ -169,13 +171,11 @@ else
   unzip -o phantomjs-2.1.1-linux-x86_64.zip && sudo cp phantomjs-2.1.1-linux-x86_64/bin/phantomjs /usr/bin/ 2>/dev/null || true
   sudo dpkg -i prince_11.4-1_ubuntu18.04_amd64.deb 2>/dev/null || true
 
-  # TeamViewer
   echo "Instalando TeamViewer..."
   cd /tmp && wget -q https://download.teamviewer.com/download/linux/teamviewer_amd64.deb
   sudo dpkg -i teamviewer_amd64.deb 2>/dev/null || true
 
-  # Corrige dependências quebradas (Prince, etc.)
-  echo "Corrigindo dependências quebradas..."
+  echo "Corrigindo dependências quebradas (Prince, etc.)..."
   sudo apt install --fix-broken -y
 
   # AnyDesk
@@ -192,7 +192,6 @@ else
   echo -e "passenger_ruby /home/$USER/.rbenv/shims/ruby;\npassenger_root /usr/lib/ruby/vendor_ruby/phusion_passenger/locations.ini;" | \
     sudo tee /etc/nginx/conf.d/mod-http-passenger.conf
 
-  # Dropbox + Restauracao
   mkdir -p ~/.config/autostart
   cd ~/NCommerce/ncommerce_api/essentials
   sed "s/COMPUTERUSER/$USER/g" dropboxd.desktop > ~/.config/autostart/dropboxd.desktop
@@ -205,7 +204,6 @@ else
 fi
 echo
 
-# ====================== PASSO 7/7 ======================
 if is_step_done 7; then
   echo "PASSO 7/7 já concluído anteriormente. Pulando..."
 else
