@@ -222,8 +222,8 @@ else
   sudo cp /tmp/ncommerce /etc/nginx/sites-available/ncommerce
   sudo ln -sf /etc/nginx/sites-available/ncommerce /etc/nginx/sites-enabled/ncommerce
 
-  curl -s "https://ncommerce.app:3001/setup/env/$USER?token=$TOKEN" > ~/NCommerce/ncommerce_api/.env.production
-  sudo bash -c 'cat ~/NCommerce/ncommerce_api/.env.production >> /etc/environment'
+  curl -s "https://ncommerce.app:3001/setup/env/$USER?token=$TOKEN" > /home/${USER}/NCommerce/ncommerce_api/.env.production
+  sudo bash -c "cat /home/${USER}/NCommerce/ncommerce_api/.env.production >> /etc/environment"
 
   cd ~/NCommerce/ncommerce_api
   bundle exec rake db:create db:migrate db:seed RAILS_ENV=production
