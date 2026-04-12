@@ -228,7 +228,7 @@ else
   cd ~/NCommerce/ncommerce_api
   sudo mysql < ./essentials/setup_scripts/mysql-setup.sql
   bundle exec rake db:create db:migrate db:seed RAILS_ENV=production
-  sudo systemctl reload nginx
+  sudo service nginx restart
 
   (crontab -l 2>/dev/null | grep -v "ncommerce_api/vendor/scripts" || true) > /tmp/crontab.tmp
   cat >> /tmp/crontab.tmp << EOF
@@ -240,7 +240,7 @@ else
 EOF
   crontab /tmp/crontab.tmp
   rm -f /tmp/crontab.tmp
-  sudo systemctl reload cron
+  sudo service cron reload
 
   mark_step_done 7
 fi
