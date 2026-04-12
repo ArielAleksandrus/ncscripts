@@ -1,7 +1,7 @@
 #!/bin/bash
 # =====================================================
-# INSTALADOR ÚNICO NCOMMERCE - Ubuntu 25 (RESUMÍVEL)
-# Senha sudo só uma vez • Retoma do último passo concluído
+# INSTALADOR ÚNICO NCOMMERCE - Ubuntu 25 (RESUMÍVEL + ROBUSTO)
+# Não duplica linhas • Pula clones já feitos • Corrige dependências
 # =====================================================
 
 set -e
@@ -9,14 +9,8 @@ set -e
 PROGRESS_DIR="$HOME/.ncommerce-progress"
 mkdir -p "$PROGRESS_DIR"
 
-is_step_done() {
-  [ -f "$PROGRESS_DIR/step$1.done" ]
-}
-
-mark_step_done() {
-  touch "$PROGRESS_DIR/step$1.done"
-  echo "✅ PASSO $1/7 marcado como concluído"
-}
+is_step_done() { [ -f "$PROGRESS_DIR/step$1.done" ]; }
+mark_step_done() { touch "$PROGRESS_DIR/step$1.done"; echo "✅ PASSO $1/7 marcado como concluído"; }
 
 echo "=== INSTALADOR COMPLETO NCOMMERCE (Ubuntu 25 - RESUMÍVEL) ==="
 echo
@@ -56,7 +50,6 @@ else
 
   sudo apt install -y openjdk-21-jre openjdk-21-jdk
 
-  # Configuração confiável do Java 21
   echo "Configurando Java 21 como padrão..."
   sudo update-alternatives --install /usr/bin/java java /usr/lib/jvm/java-21-openjdk-amd64/bin/java 2100
   sudo update-alternatives --install /usr/bin/javac javac /usr/lib/jvm/java-21-openjdk-amd64/bin/javac 2100
@@ -91,9 +84,16 @@ if is_step_done 3; then
   echo "PASSO 3/7 já concluído anteriormente. Pulando..."
 else
   echo "PASSO 3/7: Rbenv + Dropbox + chave SSH"
+
+  # Evita duplicar linhas no .bashrc
+  if ! grep -q 'rbenv/bin' ~/.bashrc; then
+    echo 'export PATH="$HOME/.rbenv/bin:$PATH"' >> ~/.bashrc
+  fi
+  if ! grep -q 'rbenv init' ~/.bashrc; then
+    echo 'eval "$(rbenv init -)"' >> ~/.bashrc
+  fi
+
   git clone https://github.com/rbenv/rbenv.git ~/.rbenv 2>/dev/null || true
-  echo 'export PATH="$HOME/.rbenv/bin:$PATH"' >> ~/.bashrc
-  echo 'eval "$(rbenv init -)"' >> ~/.bashrc
   git clone https://github.com/rbenv/ruby-build.git ~/.rbenv/plugins/ruby-build 2>/dev/null || true
 
   export PATH="$HOME/.rbenv/bin:$PATH"
@@ -103,7 +103,7 @@ else
 
   cd ~ && wget -O - "https://www.dropbox.com/download?plat=lnx.x86_64" | tar xzf -
 
-  # === CHAVE SSH (sempre mostra se ainda não foi marcada como feita) ===
+  # Chave SSH
   mkdir -p ~/.ssh
   if [ ! -f ~/.ssh/id_rsa ]; then
     ssh-keygen -t rsa -b 4096 -N "" -f ~/.ssh/id_rsa -q
@@ -125,12 +125,14 @@ echo
 if is_step_done 4; then
   echo "PASSO 4/7 já concluído anteriormente. Pulando..."
 else
-  echo "PASSO 4/7: Clonando repositórios"
+  echo "PASSO 4/7: Clonando repositórios (pula se já existir)"
   cd ~ && mkdir -p NCommerce && cd NCommerce
-  git clone git@bitbucket.org:Aleksandrus/ncommerce_api.git || true
-  git clone git@bitbucket.org:Aleksandrus/ncommerce.git || true
-  git clone git@bitbucket.org:Aleksandrus/sefaz-chrome-extension.git || true
-  git clone git@bitbucket.org:Aleksandrus/nfce.git || true
+
+  [ ! -d "ncommerce_api" ] && git clone git@bitbucket.org:Aleksandrus/ncommerce_api.git || true
+  [ ! -d "ncommerce" ] && git clone git@bitbucket.org:Aleksandrus/ncommerce.git || true
+  [ ! -d "sefaz-chrome-extension" ] && git clone git@bitbucket.org:Aleksandrus/sefaz-chrome-extension.git || true
+  [ ! -d "nfce" ] && git clone git@bitbucket.org:Aleksandrus/nfce.git || true
+
   mark_step_done 4
 fi
 echo
@@ -157,7 +159,7 @@ echo
 if is_step_done 6; then
   echo "PASSO 6/7 já concluído anteriormente. Pulando..."
 else
-  echo "PASSO 6/7: Impressora, AnyDesk, TeamViewer, Passenger"
+  echo "PASSO 6/7: Impressora, AnyDesk, TeamViewer, Passenger + correção de dependências"
   cd ~/NCommerce/ncommerce_api/essentials
 
   sudo cp -r libmp2032_4.4.0.5_Debian8_x64/install/usr/* /usr/ 2>/dev/null || true
@@ -170,7 +172,11 @@ else
   # TeamViewer
   echo "Instalando TeamViewer..."
   cd /tmp && wget -q https://download.teamviewer.com/download/linux/teamviewer_amd64.deb
-  sudo apt install -y ./teamviewer_amd64.deb
+  sudo dpkg -i teamviewer_amd64.deb 2>/dev/null || true
+
+  # Corrige dependências quebradas (Prince, etc.)
+  echo "Corrigindo dependências quebradas..."
+  sudo apt install --fix-broken -y
 
   # AnyDesk
   wget -qO - https://keys.anydesk.com/repos/DEB-GPG-KEY | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/anydesk.gpg > /dev/null
@@ -224,7 +230,6 @@ else
   bundle exec rake db:create db:migrate db:seed RAILS_ENV=production
   sudo systemctl reload nginx
 
-  # Cron jobs
   (crontab -l 2>/dev/null | grep -v "ncommerce_api/vendor/scripts" || true) > /tmp/crontab.tmp
   cat >> /tmp/crontab.tmp << EOF
 * * * * * /home/${USER}/NCommerce/ncommerce_api/vendor/scripts/chown_files.sh /home/${USER}/NCommerce/ncommerce_api
@@ -241,7 +246,6 @@ EOF
 fi
 echo
 
-# ====================== FINAL ======================
 echo "🎉 INSTALAÇÃO CONCLUÍDA COM SUCESSO!"
 echo "O computador será reiniciado em 10 segundos..."
 sleep 10
