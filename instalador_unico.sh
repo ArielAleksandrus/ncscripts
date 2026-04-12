@@ -1,7 +1,7 @@
 #!/bin/bash
 # =====================================================
 # INSTALADOR ÚNICO NCOMMERCE - Ubuntu 25
-# Tudo em um arquivo • Senha sudo só uma vez • Progresso claro
+# Senha sudo só uma vez • Pausa para chave SSH no Bitbucket
 # =====================================================
 
 set -e
@@ -67,7 +67,7 @@ echo 'eval "$(rbenv init -)"' >> ~/.bashrc
 
 git clone https://github.com/rbenv/ruby-build.git ~/.rbenv/plugins/ruby-build 2>/dev/null || true
 
-# Recarrega ambiente rbenv no shell atual
+# Recarrega ambiente rbenv
 export PATH="$HOME/.rbenv/bin:$PATH"
 eval "$(rbenv init -)"
 
@@ -75,10 +75,25 @@ sudo apt autoremove -y
 
 cd ~ && wget -O - "https://www.dropbox.com/download?plat=lnx.x86_64" | tar xzf -
 
+# ==================== GERAÇÃO E EXIBIÇÃO DA CHAVE SSH ====================
+mkdir -p ~/.ssh
 if [ ! -f ~/.ssh/id_rsa ]; then
-  mkdir -p ~/.ssh
   ssh-keygen -t rsa -b 4096 -N "" -f ~/.ssh/id_rsa -q
+  echo "✅ Nova chave SSH gerada"
+else
+  echo "✅ Chave SSH já existe"
 fi
+
+echo ""
+echo "══════════════════════════════════════════════════════════════"
+echo "🔑 COPIE A CHAVE PÚBLICA ABAIXO e adicione no Bitbucket:"
+echo "   (Bitbucket → Settings → Personal settings → SSH keys → Add key)"
+echo ""
+cat ~/.ssh/id_rsa.pub
+echo ""
+echo "══════════════════════════════════════════════════════════════"
+read -r -p "✅ Pressione ENTER quando a chave já estiver adicionada no Bitbucket..."
+echo "✅ Chave SSH confirmada. Continuando..."
 echo "✅ PASSO 3/7 concluído"
 echo
 
@@ -107,7 +122,7 @@ echo "✅ PASSO 5/7 concluído"
 echo
 
 # ====================== PASSO 6/7 ======================
-echo "PASSO 6/7: Configurações específicas (impressora, AnyDesk, TeamViewer, Passenger)"
+echo "PASSO 6/7: Impressora, AnyDesk, TeamViewer, Passenger"
 cd ~/NCommerce/ncommerce_api/essentials
 
 # Impressora 80mm
@@ -119,18 +134,17 @@ sudo dpkg -i bematech-driver_2.0.0.6-1_amd64.deb 2>/dev/null || true
 unzip -o phantomjs-2.1.1-linux-x86_64.zip && sudo cp phantomjs-2.1.1-linux-x86_64/bin/phantomjs /usr/bin/ 2>/dev/null || true
 sudo dpkg -i prince_11.4-1_ubuntu18.04_amd64.deb 2>/dev/null || true
 
-# TeamViewer (oficial mais recente - com repositório)
-echo "Instalando TeamViewer (versão mais recente)..."
-cd /tmp
-wget -q https://download.teamviewer.com/download/linux/teamviewer_amd64.deb
+# TeamViewer (mais recente)
+echo "Instalando TeamViewer..."
+cd /tmp && wget -q https://download.teamviewer.com/download/linux/teamviewer_amd64.deb
 sudo apt install -y ./teamviewer_amd64.deb
 
-# AnyDesk (repositório)
+# AnyDesk
 wget -qO - https://keys.anydesk.com/repos/DEB-GPG-KEY | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/anydesk.gpg > /dev/null
 echo "deb http://deb.anydesk.com/ all main" | sudo tee /etc/apt/sources.list.d/anydesk-stable.list
 sudo apt update && sudo apt install -y anydesk
 
-# Passenger + Nginx
+# Passenger
 curl https://oss-binaries.phusionpassenger.com/auto-software-signing-gpg-key-2025.txt | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/phusion.gpg >/dev/null
 sudo sh -c 'echo deb https://oss-binaries.phusionpassenger.com/apt/passenger $(lsb_release -sc) main > /etc/apt/sources.list.d/passenger.list'
 sudo apt update
@@ -139,7 +153,7 @@ sudo apt install -y passenger passenger-dev libnginx-mod-http-passenger
 echo -e "passenger_ruby /home/$USER/.rbenv/shims/ruby;\npassenger_root /usr/lib/ruby/vendor_ruby/phusion_passenger/locations.ini;" | \
   sudo tee /etc/nginx/conf.d/mod-http-passenger.conf
 
-# Dropbox autostart + Restauracao.desktop
+# Dropbox e Restauracao
 mkdir -p ~/.config/autostart
 cd ~/NCommerce/ncommerce_api/essentials
 sed "s/COMPUTERUSER/$USER/g" dropboxd.desktop > ~/.config/autostart/dropboxd.desktop
