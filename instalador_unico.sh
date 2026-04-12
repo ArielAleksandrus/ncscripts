@@ -40,7 +40,16 @@ zlib1g-dev libncurses-dev libffi-dev libgdbm6 libgdbm-dev nginx dirmngr gnupg \
 samba smbclient libsmbclient python3-smbc htop
 
 sudo apt install -y openjdk-21-jre openjdk-21-jdk
-sudo update-java-alternatives --set /usr/lib/jvm/java-21-openjdk-amd64
+
+# === CORREÇÃO DO JAVA 21 (método confiável) ===
+echo "Configurando Java 21 como versão padrão..."
+sudo update-alternatives --install /usr/bin/java java /usr/lib/jvm/java-21-openjdk-amd64/bin/java 2100
+sudo update-alternatives --install /usr/bin/javac javac /usr/lib/jvm/java-21-openjdk-amd64/bin/javac 2100
+sudo update-alternatives --set java /usr/lib/jvm/java-21-openjdk-amd64/bin/java
+sudo update-alternatives --set javac /usr/lib/jvm/java-21-openjdk-amd64/bin/javac
+
+echo "Java 21 configurado:"
+java -version
 echo "✅ PASSO 1/7 concluído"
 echo
 
@@ -67,7 +76,6 @@ echo 'eval "$(rbenv init -)"' >> ~/.bashrc
 
 git clone https://github.com/rbenv/ruby-build.git ~/.rbenv/plugins/ruby-build 2>/dev/null || true
 
-# Recarrega ambiente rbenv
 export PATH="$HOME/.rbenv/bin:$PATH"
 eval "$(rbenv init -)"
 
@@ -75,7 +83,7 @@ sudo apt autoremove -y
 
 cd ~ && wget -O - "https://www.dropbox.com/download?plat=lnx.x86_64" | tar xzf -
 
-# ==================== GERAÇÃO E EXIBIÇÃO DA CHAVE SSH ====================
+# ==================== CHAVE SSH ====================
 mkdir -p ~/.ssh
 if [ ! -f ~/.ssh/id_rsa ]; then
   ssh-keygen -t rsa -b 4096 -N "" -f ~/.ssh/id_rsa -q
@@ -97,7 +105,7 @@ echo "✅ Chave SSH confirmada. Continuando..."
 echo "✅ PASSO 3/7 concluído"
 echo
 
-# ====================== PASSO 4/7 ======================
+# ====================== PASSO 4/7 a 7/7 (igual ao anterior) ======================
 echo "PASSO 4/7: Clonando repositórios"
 cd ~ && mkdir -p NCommerce && cd NCommerce
 git clone git@bitbucket.org:Aleksandrus/ncommerce_api.git
@@ -107,7 +115,6 @@ git clone git@bitbucket.org:Aleksandrus/nfce.git
 echo "✅ PASSO 4/7 concluído"
 echo
 
-# ====================== PASSO 5/7 ======================
 echo "PASSO 5/7: Ruby 3.4.9 + Rails 7 + bundle"
 rbenv install 3.4.9 --verbose
 rbenv global 3.4.9
@@ -121,20 +128,17 @@ cd ~/NCommerce/ncommerce_api && bundle install
 echo "✅ PASSO 5/7 concluído"
 echo
 
-# ====================== PASSO 6/7 ======================
 echo "PASSO 6/7: Impressora, AnyDesk, TeamViewer, Passenger"
 cd ~/NCommerce/ncommerce_api/essentials
 
-# Impressora 80mm
 sudo cp -r libmp2032_4.4.0.5_Debian8_x64/install/usr/* /usr/ 2>/dev/null || true
 unzip -o Driver_CUPS_Ubuntu_18e20.zip
 sudo dpkg -i bematech-driver_2.0.0.6-1_amd64.deb 2>/dev/null || true
 
-# PhantomJS + Prince
 unzip -o phantomjs-2.1.1-linux-x86_64.zip && sudo cp phantomjs-2.1.1-linux-x86_64/bin/phantomjs /usr/bin/ 2>/dev/null || true
 sudo dpkg -i prince_11.4-1_ubuntu18.04_amd64.deb 2>/dev/null || true
 
-# TeamViewer (mais recente)
+# TeamViewer
 echo "Instalando TeamViewer..."
 cd /tmp && wget -q https://download.teamviewer.com/download/linux/teamviewer_amd64.deb
 sudo apt install -y ./teamviewer_amd64.deb
@@ -153,7 +157,6 @@ sudo apt install -y passenger passenger-dev libnginx-mod-http-passenger
 echo -e "passenger_ruby /home/$USER/.rbenv/shims/ruby;\npassenger_root /usr/lib/ruby/vendor_ruby/phusion_passenger/locations.ini;" | \
   sudo tee /etc/nginx/conf.d/mod-http-passenger.conf
 
-# Dropbox e Restauracao
 mkdir -p ~/.config/autostart
 cd ~/NCommerce/ncommerce_api/essentials
 sed "s/COMPUTERUSER/$USER/g" dropboxd.desktop > ~/.config/autostart/dropboxd.desktop
@@ -165,7 +168,6 @@ sudo apt install --fix-broken -y
 echo "✅ PASSO 6/7 concluído"
 echo
 
-# ====================== PASSO 7/7 ======================
 echo "PASSO 7/7: Nginx + .env + banco + cron"
 ssh-keyscan -H nlabs.live >> ~/.ssh/known_hosts 2>/dev/null
 ssh-keyscan -H tunnel.nlabs.live >> ~/.ssh/known_hosts 2>/dev/null
@@ -187,7 +189,6 @@ cd ~/NCommerce/ncommerce_api
 bundle exec rake db:create db:migrate db:seed RAILS_ENV=production
 sudo systemctl reload nginx
 
-# Cron jobs
 (crontab -l 2>/dev/null | grep -v "ncommerce_api/vendor/scripts" || true) > /tmp/crontab.tmp
 cat >> /tmp/crontab.tmp << EOF
 * * * * * /home/${USER}/NCommerce/ncommerce_api/vendor/scripts/chown_files.sh /home/${USER}/NCommerce/ncommerce_api
@@ -203,7 +204,6 @@ sudo systemctl reload cron
 echo "✅ PASSO 7/7 concluído"
 echo
 
-# ====================== FINAL ======================
 echo "🎉 INSTALAÇÃO CONCLUÍDA COM SUCESSO!"
 echo "O computador será reiniciado em 10 segundos..."
 sleep 10
