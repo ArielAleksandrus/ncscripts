@@ -165,10 +165,28 @@ else
   echo "PASSO 6/7: Impressora, AnyDesk, TeamViewer, Passenger + correção de dependências"
   cd ~/NCommerce/ncommerce_api/essentials
 
+  # ================== NOVO: INSTALAÇÃO DO DRIVER ELGIN ==================
+  echo "→ Instalando Driver Elgin..."
+  if [ -f "DriverElgin.zip" ]; then
+      unzip -o DriverElgin.zip
+      if [ -d "setup" ]; then
+          cd setup
+          chmod +x install
+          echo "→ Executando instalação do Driver Elgin como root..."
+          sudo ./install
+          cd ..
+          echo "✅ Driver Elgin instalado com sucesso!"
+      else
+          echo "❌ ERRO: Pasta 'setup' não encontrada após descompactar DriverElgin.zip"
+      fi
+  else
+      echo "⚠️  DriverElgin.zip não encontrado (pulando)"
+  fi
+  # =====================================================================
+
   sudo cp -r libmp2032_4.4.0.5_Debian8_x64/install/usr/* /usr/ 2>/dev/null || true
   unzip -o Driver_CUPS_Ubuntu_18e20.zip
   sudo dpkg -i bematech-driver_2.0.0.6-1_amd64.deb 2>/dev/null || true
-
   unzip -o phantomjs-2.1.1-linux-x86_64.zip && sudo cp phantomjs-2.1.1-linux-x86_64/bin/phantomjs /usr/bin/ 2>/dev/null || true
   sudo dpkg -i prince_11.4-1_ubuntu18.04_amd64.deb 2>/dev/null || true
 
@@ -176,7 +194,7 @@ else
   cd /tmp && wget -q https://download.teamviewer.com/download/linux/teamviewer_amd64.deb
   sudo dpkg -i teamviewer_amd64.deb 2>/dev/null || true
 
-  echo "Corrigindo dependências quebradas (Prince, etc.)..."
+  echo "Corrigindo dependências quebradas..."
   sudo apt install --fix-broken -y
 
   # AnyDesk
@@ -194,16 +212,19 @@ else
     sudo tee /etc/nginx/conf.d/mod-http-passenger.conf
 
   mkdir -p ~/.config/autostart
-  cd ~/NCommerce/ncommerce_api/essentials
+
+  # ================== ATALHO NA ÁREA DE TRABALHO (corrigido) ==================
+  DESKTOP_DIR=$(xdg-user-dir DESKTOP)
   sed "s/COMPUTERUSER/$USER/g" dropboxd.desktop > ~/.config/autostart/dropboxd.desktop
-  sed "s/COMPUTERUSER/$USER/g" restauracao.desktop > ~/Desktop/Restauracao.desktop
-  gio set ~/Desktop/Restauracao.desktop metadata::trusted true
-  chmod +x ~/Desktop/Restauracao.desktop
+  sed "s/COMPUTERUSER/$USER/g" restauracao.desktop > "$DESKTOP_DIR/Restauracao.desktop"
+  
+  gio set "$DESKTOP_DIR/Restauracao.desktop" metadata::trusted true
+  chmod +x "$DESKTOP_DIR/Restauracao.desktop"
+  # ===========================================================================
 
   sudo apt install --fix-broken -y
   mark_step_done 6
 fi
-echo
 
 if is_step_done 7; then
   echo "PASSO 7/7 já concluído anteriormente. Pulando..."
