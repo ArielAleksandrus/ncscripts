@@ -246,6 +246,7 @@ else
   curl -s "https://ncommerce.app:3001/setup/env/$USER?token=$TOKEN" > /home/${USER}/NCommerce/ncommerce_api/.env.production
   sudo bash -c "cat /home/${USER}/NCommerce/ncommerce_api/.env.production >> /etc/environment"
 
+  chmod o+x /home/${USER} # newer nginx requires this
   cd ~/NCommerce/ncommerce_api
   sudo mysql < ./essentials/setup_scripts/mysql-setup.sql
   bundle exec rake db:create db:migrate db:seed RAILS_ENV=production
