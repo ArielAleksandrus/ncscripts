@@ -43,10 +43,18 @@ if is_step_done 1; then
 else
   echo "PASSO 1/7: Atualizando sistema + pacotes + JDK 21"
   sudo apt update && sudo apt upgrade -y
-  sudo apt install -y git chromium-browser build-essential curl default-jre imagemagick openssh-server \
+  sudo apt install -y git build-essential curl wget default-jre imagemagick openssh-server \
   mysql-server libmysqlclient-dev redis-server bison libssl-dev libyaml-dev libreadline-dev \
   zlib1g-dev libncurses-dev libffi-dev libgdbm6 libgdbm-dev nginx dirmngr gnupg \
-  samba smbclient libsmbclient python3-smbc htop
+  samba smbclient libsmbclient python3-smbc htop \
+  zenity zip unzip cups
+
+  echo "Instalando Google Chrome (.deb, sem snap)..."
+  curl -fsSL -o /tmp/google-chrome-stable_current_amd64.deb \
+    https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+  sudo dpkg -i /tmp/google-chrome-stable_current_amd64.deb || sudo apt-get install -f -y
+  rm -f /tmp/google-chrome-stable_current_amd64.deb
+  xdg-settings set default-web-browser google-chrome.desktop 2>/dev/null || true
 
   sudo apt install -y openjdk-21-jre openjdk-21-jdk
 
@@ -101,6 +109,24 @@ else
   sudo apt autoremove -y
 
   cd ~ && wget -O - "https://www.dropbox.com/download?plat=lnx.x86_64" | tar xzf -
+  mkdir -p ~/.config/autostart
+  cat > ~/.config/autostart/dropboxd.desktop <<EOF
+[Desktop Entry]
+Type=Application
+Exec=${HOME}/.dropbox-dist/dropboxd
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name=Dropbox
+EOF
+  "${HOME}/.dropbox-dist/dropboxd" >/tmp/dropboxd.log 2>&1 &
+  echo ""
+  echo "══════════════════════════════════════════════════════════════"
+  echo "Dropbox foi iniciado. Faca login na CONTA DA EMPRESA."
+  echo "Depois: preferencias -> Sync -> desmarque pastas de terceiros."
+  echo "O atalho Restauracao na area de trabalho usa o ncommerce.zip do Dropbox."
+  echo "══════════════════════════════════════════════════════════════"
+  read -r -p "Pressione ENTER depois de logar no Dropbox (ou ENTER para seguir sem backup)..."
 
   mkdir -p ~/.ssh
   if [ ! -f ~/.ssh/id_rsa ]; then
@@ -213,14 +239,19 @@ else
 
   mkdir -p ~/.config/autostart
 
-  # ================== ATALHO NA ÁREA DE TRABALHO (corrigido) ==================
-  DESKTOP_DIR=$(xdg-user-dir DESKTOP)
+  # Atalho na área de trabalho: English "Desktop" AND Portuguese "Área de Trabalho"
   sed "s/COMPUTERUSER/$USER/g" dropboxd.desktop > ~/.config/autostart/dropboxd.desktop
-  sed "s/COMPUTERUSER/$USER/g" restauracao.desktop > "$DESKTOP_DIR/Restauracao.desktop"
-  
-  gio set "$DESKTOP_DIR/Restauracao.desktop" metadata::trusted true
-  chmod +x "$DESKTOP_DIR/Restauracao.desktop"
-  # ===========================================================================
+  RESTORE_TMP="$(mktemp)"
+  sed "s/COMPUTERUSER/$USER/g" restauracao.desktop > "$RESTORE_TMP"
+  chmod +x ~/NCommerce/ncommerce_api/vendor/scripts/restore_backup.sh
+  for DESKTOP_DIR in "${HOME}/Desktop" "${HOME}/Área de Trabalho" "$(command -v xdg-user-dir >/dev/null && xdg-user-dir DESKTOP || true)"; do
+    [ -n "$DESKTOP_DIR" ] || continue
+    mkdir -p "$DESKTOP_DIR"
+    cp "$RESTORE_TMP" "$DESKTOP_DIR/Restauracao.desktop"
+    chmod +x "$DESKTOP_DIR/Restauracao.desktop"
+    gio set "$DESKTOP_DIR/Restauracao.desktop" metadata::trusted true 2>/dev/null || true
+  done
+  rm -f "$RESTORE_TMP"
 
   sudo apt install --fix-broken -y
   mark_step_done 6

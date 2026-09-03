@@ -39,11 +39,20 @@ Agora, resta criar o banco de dados e as tarefas cron (requer "sudo ls" antes)
 
 Após isto, realizar os seguintes procedimentos:
   1. colocar ip fixo na máquina do cliente
-  2. instalar impressoras
-  3. adicionar extensão ncommerce no chromium (extensões -> modo desenvolvedor ON -> carregar sem compactar /home/<usuario>/NCommerce/sefaz-chrome-extension -> Fixar no navegador)
+  2. instalar impressoras (ou restaurar o backup — passo abaixo)
+  3. adicionar extensão ncommerce no Google Chrome (extensões -> modo desenvolvedor ON -> carregar sem compactar /home/<usuario>/NCommerce/sefaz-chrome-extension -> Fixar no navegador)
   4. reiniciar o pc e testar o acesso remoto
   5. setar configurações de nota fiscal (exclusivo NCommerce)
   6. instalar certificado no navegador (exclusivo ncommerce)
+
+PARA RESTAURAR UM BACKUP (PC novo / Ubuntu fresco):
+  1. Instalar tudo com os scripts acima (Dropbox logado na conta da empresa)
+  2. Esperar o Dropbox baixar ncommerce.zip  (ou copiar o zip para ~/Downloads)
+  3. Na área de trabalho, abrir o atalho "Restauracao"
+  4. Suporte informa a senha do zip (6 primeiros caracteres do token NCommerce)
+  5. O técnico informa a senha sudo DESTE computador
+  6. O script restaura banco, .env, impressoras, NFC-e e documentos
+     (usuario linux, senha sudo e caminhos ficam os desta máquina)
 
 PARA TABLETS DE AUTOATENDIMENTO:
   1. Para cada tablet, habilitar a flag "Insecure origins treated as secure"

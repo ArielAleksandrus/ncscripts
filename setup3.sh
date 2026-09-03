@@ -47,20 +47,21 @@ sudo dpkg -i prince_11.4-1_ubuntu18.04_amd64.deb
 sudo dpkg -i teamviewer_15.13.6_amd64.deb
 sudo apt install --fix-broken -y
 
-# Add Dropbox to startup
+# Add Dropbox autostart + Restauracao shortcut (Desktop AND "Área de Trabalho")
 mkdir -p ~/.config/autostart
-cd ~/NCommerce/ncommerce_api/essentials && \
-sed -i "s/COMPUTERUSER/$1/g" dropboxd.desktop && \
-cp dropboxd.desktop ~/.config/autostart/dropboxd.desktop && \
-sed -i "s/$1/COMPUTERUSER/g" dropboxd.desktop
-
-# Add Restauracao (backup restoration script) to Desktop
-cd ~/NCommerce/ncommerce_api/essentials && \
-sed -i "s/COMPUTERUSER/$1/g" restauracao.desktop && \
-cp restauracao.desktop ~/Desktop/Restauracao.desktop && \
-sed -i "s/$1/COMPUTERUSER/g" restauracao.desktop && \
-gio set ~/Desktop/Restauracao.desktop metadata::trusted true && \
-chmod a+x ~/Desktop/Restauracao.desktop
+cd ~/NCommerce/ncommerce_api/essentials
+sed "s/COMPUTERUSER/$1/g" dropboxd.desktop > ~/.config/autostart/dropboxd.desktop
+RESTORE_TMP="$(mktemp)"
+sed "s/COMPUTERUSER/$1/g" restauracao.desktop > "$RESTORE_TMP"
+chmod a+x ~/NCommerce/ncommerce_api/vendor/scripts/restore_backup.sh
+for DESKTOP_DIR in "${HOME}/Desktop" "${HOME}/Área de Trabalho" "$(command -v xdg-user-dir >/dev/null && xdg-user-dir DESKTOP || true)"; do
+  [ -n "$DESKTOP_DIR" ] || continue
+  mkdir -p "$DESKTOP_DIR"
+  cp "$RESTORE_TMP" "$DESKTOP_DIR/Restauracao.desktop"
+  chmod a+x "$DESKTOP_DIR/Restauracao.desktop"
+  gio set "$DESKTOP_DIR/Restauracao.desktop" metadata::trusted true 2>/dev/null || true
+done
+rm -f "$RESTORE_TMP"
 
 
 # Install AnyDesk
