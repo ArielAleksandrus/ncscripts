@@ -300,6 +300,16 @@ fi
 echo
 
 echo "🎉 INSTALAÇÃO CONCLUÍDA COM SUCESSO!"
-echo "O computador será reiniciado em 10 segundos..."
-sleep 10
-sudo reboot
+# This file is the installer for a fresh Ubuntu 24 restaurant PC.
+# Windows/WSL only skips reboot so we do not reboot the host Windows box.
+if [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null; then
+  echo "WSL detectado: NÃO vou reiniciar o Windows."
+  echo "Para aplicar systemd/nginx de ponta a ponta:"
+  echo "  1. No PowerShell (Admin):  wsl --shutdown"
+  echo "  2. Depois rode windows\\ncommerce-wsl-startup.bat"
+  echo "  3. Ou só abra o Ubuntu de novo; o agendamento de logon também sobe o WSL."
+else
+  echo "O computador será reiniciado em 10 segundos..."
+  sleep 10
+  sudo reboot
+fi

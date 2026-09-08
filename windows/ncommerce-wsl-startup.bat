@@ -32,6 +32,9 @@ set WSL_PORTS=3000 4200
 echo Starting %DISTRO%...
 wsl.exe -d %DISTRO% -u root -- true
 
+rem systemd needs a few seconds after first attach before nginx/cron exist
+timeout /t 3 /nobreak >nul
+
 set MIRRORED=0
 if exist "%UserProfile%\.wslconfig" (
     findstr /i /r /c:"networkingMode[ \t]*=[ \t]*mirrored" "%UserProfile%\.wslconfig" >nul 2>&1
