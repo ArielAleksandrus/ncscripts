@@ -45,8 +45,8 @@ else
   sudo apt update && sudo apt upgrade -y
   sudo apt install -y git build-essential curl wget default-jre imagemagick openssh-server \
   mysql-server libmysqlclient-dev redis-server bison libssl-dev libyaml-dev libreadline-dev \
-  zlib1g-dev libncurses-dev libffi-dev libgdbm6 libgdbm-dev nginx dirmngr gnupg \
-  samba smbclient libsmbclient python3-smbc htop \
+  zlib1g-dev libncurses-dev libffi-dev libgdbm6t64 libgdbm-dev nginx dirmngr gnupg \
+  samba smbclient libsmbclient0 python3-smbc htop \
   zenity zip unzip cups
 
   echo "Instalando Google Chrome (.deb, sem snap)..."
