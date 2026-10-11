@@ -1,10 +1,22 @@
 #!/bin/bash
 # =====================================================
-# INSTALADOR ÚNICO NCOMMERCE - Ubuntu 25 (RESUMÍVEL + ROBUSTO)
+# INSTALADOR ÚNICO NCOMMERCE - Ubuntu 24.04 / 26.04 e WSL (RESUMÍVEL + ROBUSTO)
 # ✅ Não duplica rbenv • ✅ Pula clones já feitos • ✅ Corrige dependências
 # =====================================================
 
 set -e
+
+IS_WSL=0
+if [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null; then
+  IS_WSL=1
+fi
+
+# Os caminhos /home/<usuario> precisam ser os do usuário que roda o script.
+LINUX_USER="$(id -un)"
+if [ "$LINUX_USER" = "root" ]; then
+  echo "❌ Não rode como root (nem com sudo). Entre com o usuário Linux normal e rode ./instalador_unico.sh"
+  exit 1
+fi
 
 PROGRESS_DIR="$HOME/.ncommerce-progress"
 mkdir -p "$PROGRESS_DIR"
@@ -12,7 +24,7 @@ mkdir -p "$PROGRESS_DIR"
 is_step_done() { [ -f "$PROGRESS_DIR/step$1.done" ]; }
 mark_step_done() { touch "$PROGRESS_DIR/step$1.done"; echo "✅ PASSO $1/7 marcado como concluído"; }
 
-echo "=== INSTALADOR COMPLETO NCOMMERCE (Ubuntu 25 - RESUMÍVEL) ==="
+echo "=== INSTALADOR COMPLETO NCOMMERCE (Ubuntu 24.04 / 26.04 - RESUMÍVEL) ==="
 echo
 
 # ====================== SUDO KEEP-ALIVE ======================
@@ -27,12 +39,12 @@ trap 'kill $KEEP_ALIVE_PID 2>/dev/null || true' EXIT
 
 # ====================== DADOS ======================
 read -p "Digite o TOKEN do NCommerce: " TOKEN
-read -p "Digite seu usuário Linux: " USER
 
-if [ -z "$TOKEN" ] || [ -z "$USER" ]; then
-  echo "❌ Token ou usuário não informado!"
+if [ -z "$TOKEN" ]; then
+  echo "❌ Token não informado!"
   exit 1
 fi
+echo "Usuário Linux: $LINUX_USER"
 
 echo "🚀 Iniciando instalação (resumível)..."
 echo
@@ -47,7 +59,7 @@ else
   mysql-server libmysqlclient-dev redis-server bison libssl-dev libyaml-dev libreadline-dev \
   zlib1g-dev libncurses-dev libffi-dev libgdbm6t64 libgdbm-dev nginx dirmngr gnupg \
   samba smbclient libsmbclient0 python3-smbc htop \
-  zenity zip unzip cups
+  zenity zip unzip cups cron
 
   echo "Instalando Google Chrome (.deb, sem snap)..."
   curl -fsSL -o /tmp/google-chrome-stable_current_amd64.deb \
@@ -55,6 +67,10 @@ else
   sudo dpkg -i /tmp/google-chrome-stable_current_amd64.deb || sudo apt-get install -f -y
   rm -f /tmp/google-chrome-stable_current_amd64.deb
   xdg-settings set default-web-browser google-chrome.desktop 2>/dev/null || true
+  # printer.rb usa "chromium" como fallback do Prince; o .deb do Chrome só cria "google-chrome".
+  if ! command -v chromium >/dev/null 2>&1; then
+    sudo ln -sf /usr/bin/google-chrome /usr/local/bin/chromium
+  fi
 
   sudo apt install -y openjdk-21-jre openjdk-21-jdk
 
@@ -152,11 +168,22 @@ else
   echo "PASSO 4/7: Clonando repositórios (pula se já existir)"
   cd ~ && mkdir -p NCommerce && cd NCommerce
 
-  # Verificação mais robusta
+  # Evita a pergunta "Are you sure you want to continue connecting?" no primeiro clone
+  mkdir -p ~/.ssh
+  if ! ssh-keygen -F bitbucket.org >/dev/null 2>&1; then
+    ssh-keyscan -H bitbucket.org >> ~/.ssh/known_hosts 2>/dev/null
+  fi
+
   for repo in ncommerce_api ncommerce sefaz-chrome-extension nfce; do
     if [ ! -d "$repo/.git" ]; then
       echo "Clonando $repo..."
-      git clone "git@bitbucket.org:Aleksandrus/$repo.git" || true
+      if ! git clone "git@bitbucket.org:Aleksandrus/$repo.git"; then
+        echo ""
+        echo "❌ Não consegui clonar $repo. Confira se a chave abaixo está no Bitbucket:"
+        cat ~/.ssh/id_rsa.pub
+        echo "Depois rode ./instalador_unico.sh de novo (ele continua deste passo)."
+        exit 1
+      fi
     else
       echo "✅ $repo já existe. Pulando clone."
     fi
@@ -195,12 +222,12 @@ else
   echo "→ Instalando Driver Elgin..."
   if [ -f "DriverElgin.zip" ]; then
       unzip -o DriverElgin.zip
-      if [ -d "setup" ]; then
-          cd setup
-          chmod +x install
+      # O zip descompacta em Elgin_i9_linux_driver_vX.Y.Z/setup
+      ELGIN_SETUP="$(find . -maxdepth 3 -type d -path '*Elgin*/setup' | head -n 1)"
+      if [ -n "$ELGIN_SETUP" ]; then
+          chmod +x "$ELGIN_SETUP/install"
           echo "→ Executando instalação do Driver Elgin como root..."
-          sudo ./install
-          cd ..
+          (cd "$ELGIN_SETUP" && sudo ./install)
           echo "✅ Driver Elgin instalado com sucesso!"
       else
           echo "❌ ERRO: Pasta 'setup' não encontrada após descompactar DriverElgin.zip"
@@ -213,20 +240,44 @@ else
   sudo cp -r libmp2032_4.4.0.5_Debian8_x64/install/usr/* /usr/ 2>/dev/null || true
   unzip -o Driver_CUPS_Ubuntu_18e20.zip
   sudo dpkg -i bematech-driver_2.0.0.6-1_amd64.deb 2>/dev/null || true
-  unzip -o phantomjs-2.1.1-linux-x86_64.zip && sudo cp phantomjs-2.1.1-linux-x86_64/bin/phantomjs /usr/bin/ 2>/dev/null || true
-  sudo dpkg -i prince_11.4-1_ubuntu18.04_amd64.deb 2>/dev/null || true
+  # phantomjs 2.1.1 aborta com "Auto configuration failed" no OpenSSL 3 (Ubuntu 22+):
+  # o binário real fica em /usr/local/lib e /usr/bin/phantomjs roda ele com OPENSSL_CONF=/dev/null.
+  unzip -o phantomjs-2.1.1-linux-x86_64.zip
+  sudo install -D -m 755 phantomjs-2.1.1-linux-x86_64/bin/phantomjs /usr/local/lib/phantomjs/phantomjs
+  printf '#!/bin/sh\nOPENSSL_CONF=/dev/null exec /usr/local/lib/phantomjs/phantomjs "$@"\n' | sudo tee /usr/bin/phantomjs >/dev/null
+  sudo chmod 755 /usr/bin/phantomjs
 
-  echo "Instalando TeamViewer..."
-  cd /tmp && wget -q https://download.teamviewer.com/download/linux/teamviewer_amd64.deb
-  sudo dpkg -i teamviewer_amd64.deb 2>/dev/null || true
+  # O prince_11.4 (Ubuntu 18.04) depende de libssl1.1/libtiff5, que não existem mais.
+  echo "Instalando Prince..."
+  . /etc/os-release
+  case "$VERSION_ID" in
+    20.04|22.04|24.04|26.04) PRINCE_UBUNTU="$VERSION_ID" ;;
+    *) PRINCE_UBUNTU="24.04" ;;
+  esac
+  PRINCE_DEB="/tmp/prince_16.2-1_ubuntu${PRINCE_UBUNTU}_amd64.deb"
+  if curl -fsSL -o "$PRINCE_DEB" "https://www.princexml.com/download/prince_16.2-1_ubuntu${PRINCE_UBUNTU}_amd64.deb"; then
+    sudo apt install -y "$PRINCE_DEB"
+  else
+    echo "⚠️  Não consegui baixar o Prince. Instale manualmente: https://www.princexml.com/download/"
+  fi
+  rm -f "$PRINCE_DEB"
+
+  if [ "$IS_WSL" = "1" ]; then
+    echo "WSL: TeamViewer/AnyDesk devem ser instalados no Windows, não no Ubuntu. Pulando."
+  else
+    echo "Instalando TeamViewer..."
+    cd /tmp && wget -q -O teamviewer_amd64.deb https://download.teamviewer.com/download/linux/teamviewer_amd64.deb
+    sudo apt install -y ./teamviewer_amd64.deb || true
+    rm -f teamviewer_amd64.deb
+
+    # AnyDesk
+    wget -qO - https://keys.anydesk.com/repos/DEB-GPG-KEY | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/anydesk.gpg > /dev/null
+    echo "deb http://deb.anydesk.com/ all main" | sudo tee /etc/apt/sources.list.d/anydesk-stable.list
+    sudo apt update && sudo apt install -y anydesk
+  fi
 
   echo "Corrigindo dependências quebradas..."
   sudo apt install --fix-broken -y
-
-  # AnyDesk
-  wget -qO - https://keys.anydesk.com/repos/DEB-GPG-KEY | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/anydesk.gpg > /dev/null
-  echo "deb http://deb.anydesk.com/ all main" | sudo tee /etc/apt/sources.list.d/anydesk-stable.list
-  sudo apt update && sudo apt install -y anydesk
 
   # Passenger
   curl https://oss-binaries.phusionpassenger.com/auto-software-signing-gpg-key-2025.txt | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/phusion.gpg >/dev/null
@@ -234,15 +285,15 @@ else
   sudo apt update
   sudo apt install -y passenger passenger-dev libnginx-mod-http-passenger
 
-  echo -e "passenger_ruby /home/$USER/.rbenv/shims/ruby;\npassenger_root /usr/lib/ruby/vendor_ruby/phusion_passenger/locations.ini;" | \
+  echo -e "passenger_ruby /home/$LINUX_USER/.rbenv/shims/ruby;\npassenger_root /usr/lib/ruby/vendor_ruby/phusion_passenger/locations.ini;" | \
     sudo tee /etc/nginx/conf.d/mod-http-passenger.conf
 
   mkdir -p ~/.config/autostart
 
   # Atalho na área de trabalho: English "Desktop" AND Portuguese "Área de Trabalho"
-  sed "s/COMPUTERUSER/$USER/g" dropboxd.desktop > ~/.config/autostart/dropboxd.desktop
+  sed "s/COMPUTERUSER/$LINUX_USER/g" dropboxd.desktop > ~/.config/autostart/dropboxd.desktop
   RESTORE_TMP="$(mktemp)"
-  sed "s/COMPUTERUSER/$USER/g" restauracao.desktop > "$RESTORE_TMP"
+  sed "s/COMPUTERUSER/$LINUX_USER/g" restauracao.desktop > "$RESTORE_TMP"
   chmod +x ~/NCommerce/ncommerce_api/vendor/scripts/restore_backup.sh
   for DESKTOP_DIR in "${HOME}/Desktop" "${HOME}/Área de Trabalho" "$(command -v xdg-user-dir >/dev/null && xdg-user-dir DESKTOP || true)"; do
     [ -n "$DESKTOP_DIR" ] || continue
@@ -263,21 +314,29 @@ else
   echo "PASSO 7/7: Nginx + .env + banco + cron"
   ssh-keyscan -H nlabs.live >> ~/.ssh/known_hosts 2>/dev/null
   ssh-keyscan -H tunnel.nlabs.live >> ~/.ssh/known_hosts 2>/dev/null
-  cat ~/NCommerce/ncommerce_api/essentials/ssh_config.txt >> ~/.ssh/config 2>/dev/null || true
+  if ! grep -qs 'nlabs' ~/.ssh/config; then
+    cat ~/NCommerce/ncommerce_api/essentials/ssh_config.txt >> ~/.ssh/config 2>/dev/null || true
+  fi
+  touch ~/.ssh/config
   chmod 600 ~/.ssh/config
 
-  curl -s "https://ncommerce.app:3001/setup/nginx_back/$USER?token=$TOKEN" > /tmp/ncommerce-api
+  # -f: se o servidor responder erro (token errado etc.), aborta em vez de gravar a página de erro
+  # no nginx/.env. Baixa tudo antes de instalar qualquer arquivo.
+  SETUP_URL="https://ncommerce.app:3001/setup"
+  curl -fsS "$SETUP_URL/nginx_back/$LINUX_USER?token=$TOKEN" -o /tmp/ncommerce-api
+  curl -fsS "$SETUP_URL/nginx_front/$LINUX_USER?token=$TOKEN" -o /tmp/ncommerce
+  curl -fsS "$SETUP_URL/env/$LINUX_USER?token=$TOKEN" -o /tmp/ncommerce-env
+
   sudo cp /tmp/ncommerce-api /etc/nginx/sites-available/ncommerce-api
   sudo ln -sf /etc/nginx/sites-available/ncommerce-api /etc/nginx/sites-enabled/ncommerce-api
-
-  curl -s "https://ncommerce.app:3001/setup/nginx_front/$USER?token=$TOKEN" > /tmp/ncommerce
   sudo cp /tmp/ncommerce /etc/nginx/sites-available/ncommerce
   sudo ln -sf /etc/nginx/sites-available/ncommerce /etc/nginx/sites-enabled/ncommerce
+  rm -f /tmp/ncommerce-api /tmp/ncommerce
 
-  curl -s "https://ncommerce.app:3001/setup/env/$USER?token=$TOKEN" > /home/${USER}/NCommerce/ncommerce_api/.env.production
-  sudo bash -c "cat /home/${USER}/NCommerce/ncommerce_api/.env.production >> /etc/environment"
+  mv /tmp/ncommerce-env /home/${LINUX_USER}/NCommerce/ncommerce_api/.env.production
+  sudo bash -c "cat /home/${LINUX_USER}/NCommerce/ncommerce_api/.env.production >> /etc/environment"
 
-  chmod o+x /home/${USER} # newer nginx requires this
+  chmod o+x /home/${LINUX_USER} # newer nginx requires this
   cd ~/NCommerce/ncommerce_api
   sudo mysql < ./essentials/setup_scripts/mysql-setup.sql
   bundle exec rake db:create db:migrate db:seed RAILS_ENV=production
@@ -285,11 +344,11 @@ else
 
   (crontab -l 2>/dev/null | grep -v "ncommerce_api/vendor/scripts" || true) > /tmp/crontab.tmp
   cat >> /tmp/crontab.tmp << EOF
-* * * * * /home/${USER}/NCommerce/ncommerce_api/vendor/scripts/chown_files.sh /home/${USER}/NCommerce/ncommerce_api
-* * * * * ( sleep 30; /home/${USER}/NCommerce/ncommerce_api/vendor/scripts/chown_files.sh /home/${USER}/NCommerce/ncommerce_api )
-30 18 * * 2 /home/${USER}/NCommerce/ncommerce_api/vendor/scripts/backup.sh /home/${USER}/NCommerce/ncommerce_api
-30 17 * * 4 /home/${USER}/NCommerce/ncommerce_api/vendor/scripts/backup.sh /home/${USER}/NCommerce/ncommerce_api
-30 18 * * 6 /home/${USER}/NCommerce/ncommerce_api/vendor/scripts/backup.sh /home/${USER}/NCommerce/ncommerce_api
+* * * * * /home/${LINUX_USER}/NCommerce/ncommerce_api/vendor/scripts/chown_files.sh /home/${LINUX_USER}/NCommerce/ncommerce_api
+* * * * * ( sleep 30; /home/${LINUX_USER}/NCommerce/ncommerce_api/vendor/scripts/chown_files.sh /home/${LINUX_USER}/NCommerce/ncommerce_api )
+30 18 * * 2 /home/${LINUX_USER}/NCommerce/ncommerce_api/vendor/scripts/backup.sh /home/${LINUX_USER}/NCommerce/ncommerce_api
+30 17 * * 4 /home/${LINUX_USER}/NCommerce/ncommerce_api/vendor/scripts/backup.sh /home/${LINUX_USER}/NCommerce/ncommerce_api
+30 18 * * 6 /home/${LINUX_USER}/NCommerce/ncommerce_api/vendor/scripts/backup.sh /home/${LINUX_USER}/NCommerce/ncommerce_api
 EOF
   crontab /tmp/crontab.tmp
   rm -f /tmp/crontab.tmp
@@ -300,13 +359,12 @@ fi
 echo
 
 echo "🎉 INSTALAÇÃO CONCLUÍDA COM SUCESSO!"
-# This file is the installer for a fresh Ubuntu 24 restaurant PC.
-# Windows/WSL only skips reboot so we do not reboot the host Windows box.
-if [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null; then
+# No WSL não reinicia, para não derrubar o Windows.
+if [ "$IS_WSL" = "1" ]; then
   echo "WSL detectado: NÃO vou reiniciar o Windows."
   echo "Para aplicar systemd/nginx de ponta a ponta:"
   echo "  1. No PowerShell (Admin):  wsl --shutdown"
-  echo "  2. Depois rode windows\\ncommerce-wsl-startup.bat"
+  echo "  2. Depois rode C:\\NCommerce\\wsl\\ncommerce-wsl-startup.bat"
   echo "  3. Ou só abra o Ubuntu de novo; o agendamento de logon também sobe o WSL."
 else
   echo "O computador será reiniciado em 10 segundos..."

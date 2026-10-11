@@ -7,7 +7,12 @@
 ::      starts cron (and anything else enabled via systemctl) exactly like
 ::      a normal Ubuntu boot - no extra scripting needed for cron itself.
 ::
-::   2. Makes sure LAN clients (tablets, terminals) can reach the app.
+::   2. Keeps the distro alive. WSL stops a distro shortly after the last
+::      Windows-side wsl.exe process exits, even with nginx/mysql running
+::      under systemd, so a hidden "wsl.exe ... sleep infinity" stays
+::      attached. Only one is started, even if this runs again.
+::
+::   3. Makes sure LAN clients (tablets, terminals) can reach the app.
 ::      - If %UserProfile%\.wslconfig has networkingMode=mirrored (Windows 11
 ::        22H2+), WSL already shares the host's real network interfaces, so
 ::        a service bound to 0.0.0.0 inside WSL is already reachable at the
@@ -31,6 +36,9 @@ set WSL_PORTS=3000 4200
 
 echo Starting %DISTRO%...
 wsl.exe -d %DISTRO% -u root -- true
+
+echo Starting the hidden keepalive for %DISTRO%...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$running = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'wsl.exe' -and $_.CommandLine -like '*%DISTRO%*sleep infinity*' }; if (-not $running) { Start-Process wsl.exe -ArgumentList '-d %DISTRO% -u root --exec /bin/sleep infinity' -WindowStyle Hidden }"
 
 rem systemd needs a few seconds after first attach before nginx/cron exist
 timeout /t 3 /nobreak >nul

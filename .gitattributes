@@ -1,0 +1,6 @@
+# Scripts run inside Linux/WSL: CRLF breaks them ("/bin/bash^M: bad interpreter").
+*.sh  text eol=lf
+*.sql text eol=lf
+# cmd.exe misparses LF-only batch files in some cases.
+*.bat text eol=crlf
+*.ps1 text eol=crlf
