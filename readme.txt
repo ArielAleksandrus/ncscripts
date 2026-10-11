@@ -35,7 +35,7 @@ O ubuntu deverá reiniciar. Confira o arquivo ~/.ngrok2/ngrok.yml e o ~/NCommerc
 !!!! INSERIR A VARIAVEL COMPUTER_PASSWORD NO .env.production E NO /etc/environment !!!!
 Agora, resta criar o banco de dados e as tarefas cron (requer "sudo ls" antes)
 
-./setup5.sh
+./setup5.sh <usuario do linux>
 
 Após isto, realizar os seguintes procedimentos:
   1. colocar ip fixo na máquina do cliente
