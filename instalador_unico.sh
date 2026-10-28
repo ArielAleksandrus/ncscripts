@@ -76,6 +76,31 @@ else
   samba smbclient python3-smbc htop \
   zenity zip unzip cups cron
 
+  # Sidekiq 8 exige Redis 7+; o apt do 20.04 (5.x) e do 22.04 (6.0) é antigo demais.
+  # Igual ao setup1.sh: compila o 7.2 e faz o serviço redis-server do apt usar o binário novo,
+  # mantendo config (/etc/redis/redis.conf), usuário e dados do pacote.
+  case "$UBUNTU_VERSION" in
+    20.04|22.04)
+      REDIS_BRANCH="7.2"
+      if /usr/local/bin/redis-server --version 2>/dev/null | grep -q "v=${REDIS_BRANCH}"; then
+        echo "Redis ${REDIS_BRANCH} já instalado em /usr/local/bin, pulando compilação."
+      else
+        BUILD_DIR="$(mktemp -d)"
+        git clone --depth 1 --branch "$REDIS_BRANCH" https://github.com/redis/redis.git "$BUILD_DIR/redis"
+        make -C "$BUILD_DIR/redis" -j"$(nproc)"
+        sudo make -C "$BUILD_DIR/redis" install
+        rm -rf "$BUILD_DIR"
+      fi
+
+      sudo mkdir -p /etc/systemd/system/redis-server.service.d
+      printf '[Service]\nExecStart=\nExecStart=/usr/local/bin/redis-server /etc/redis/redis.conf\n' \
+        | sudo tee /etc/systemd/system/redis-server.service.d/override.conf >/dev/null
+      sudo systemctl daemon-reload
+      sudo systemctl enable redis-server
+      sudo systemctl restart redis-server
+      ;;
+  esac
+
   echo "Instalando Google Chrome (.deb, sem snap)..."
   curl -fsSL -o /tmp/google-chrome-stable_current_amd64.deb \
     https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
