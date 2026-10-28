@@ -5,6 +5,10 @@ O ERP (ncommerce_api, ncommerce, nfce) continua sendo Linux. Estes
 scripts só preparam o Windows para parecer um Ubuntu na LAN, e então
 chamam o mesmo instalador_unico.sh dos PCs Ubuntu.
 
+O instalador_unico.sh roda em Ubuntu 20.04, 22.04, 24.04 e 26.04 (ele
+detecta a versão sozinho). No Windows, este script sempre instala o
+Ubuntu 24.04 no WSL; as outras versões são para PCs com Ubuntu físico.
+
 O QUE O WINDOWS FAZ SOZINHO
 ---------------------------
 1. Clique com o botão direito em install-ncommerce-wsl.bat -> Executar

@@ -287,9 +287,10 @@ else
     echo "WSL: TeamViewer/AnyDesk devem ser instalados no Windows, não no Ubuntu. Pulando."
   else
     echo "Instalando TeamViewer..."
-    cd /tmp && wget -q -O teamviewer_amd64.deb https://download.teamviewer.com/download/linux/teamviewer_amd64.deb
-    sudo apt install -y ./teamviewer_amd64.deb || true
-    rm -f teamviewer_amd64.deb
+    # Sem "cd /tmp": o resto do passo usa arquivos relativos a essentials/ (dropboxd.desktop etc.).
+    wget -q -O /tmp/teamviewer_amd64.deb https://download.teamviewer.com/download/linux/teamviewer_amd64.deb
+    sudo apt install -y /tmp/teamviewer_amd64.deb || true
+    rm -f /tmp/teamviewer_amd64.deb
 
     # AnyDesk
     wget -qO - https://keys.anydesk.com/repos/DEB-GPG-KEY | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/anydesk.gpg > /dev/null
