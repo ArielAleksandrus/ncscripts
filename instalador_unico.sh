@@ -198,12 +198,12 @@ EOF
 
   echo ""
   echo "══════════════════════════════════════════════════════════════"
-  echo "🔑 COPIE A CHAVE PÚBLICA ABAIXO e adicione no Bitbucket:"
+  echo "🔑 COPIE A CHAVE PÚBLICA ABAIXO e adicione no Bitbucket E no servidor Nlabs (authorized_keys do usuário nlabs em tunnel.nlabs.live):"
   echo ""
   cat ~/.ssh/id_rsa.pub
   echo ""
   echo "══════════════════════════════════════════════════════════════"
-  read -r -p "✅ Pressione ENTER quando a chave já estiver adicionada no Bitbucket..."
+  read -r -p "✅ Pressione ENTER quando a chave já estiver adicionada no Bitbucket e no servidor Nlabs..."
   mark_step_done 3
 fi
 echo
