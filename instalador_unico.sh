@@ -1,6 +1,6 @@
 #!/bin/bash
 # =====================================================
-# INSTALADOR ÚNICO NCOMMERCE - Ubuntu 24.04 / 26.04 e WSL (RESUMÍVEL + ROBUSTO)
+# INSTALADOR ÚNICO NCOMMERCE - Ubuntu 20.04 / 22.04 / 24.04 / 26.04 e WSL (RESUMÍVEL + ROBUSTO)
 # ✅ Não duplica rbenv • ✅ Pula clones já feitos • ✅ Corrige dependências
 # =====================================================
 
@@ -18,13 +18,26 @@ if [ "$LINUX_USER" = "root" ]; then
   exit 1
 fi
 
+# ====================== VERSÃO DO UBUNTU ======================
+# O que muda entre versões (nomes de pacotes, Java, Prince) é decidido a partir daqui.
+. /etc/os-release
+UBUNTU_VERSION="${VERSION_ID:-}"
+case "${ID:-}:$UBUNTU_VERSION" in
+  ubuntu:20.04|ubuntu:22.04|ubuntu:24.04|ubuntu:26.04) ;;
+  *)
+    echo "⚠️  Este instalador suporta Ubuntu 20.04, 22.04, 24.04 e 26.04 (detectado: ${PRETTY_NAME:-desconhecido})."
+    read -r -p "Continuar mesmo assim? [s/N] " CONTINUE_ANYWAY
+    case "$CONTINUE_ANYWAY" in s|S) ;; *) exit 1 ;; esac
+    ;;
+esac
+
 PROGRESS_DIR="$HOME/.ncommerce-progress"
 mkdir -p "$PROGRESS_DIR"
 
 is_step_done() { [ -f "$PROGRESS_DIR/step$1.done" ]; }
 mark_step_done() { touch "$PROGRESS_DIR/step$1.done"; echo "✅ PASSO $1/7 marcado como concluído"; }
 
-echo "=== INSTALADOR COMPLETO NCOMMERCE (Ubuntu 24.04 / 26.04 - RESUMÍVEL) ==="
+echo "=== INSTALADOR COMPLETO NCOMMERCE (${PRETTY_NAME:-Ubuntu} - RESUMÍVEL) ==="
 echo
 
 # ====================== SUDO KEEP-ALIVE ======================
@@ -53,12 +66,14 @@ echo
 if is_step_done 1; then
   echo "PASSO 1/7 já concluído anteriormente. Pulando..."
 else
-  echo "PASSO 1/7: Atualizando sistema + pacotes + JDK 21"
+  echo "PASSO 1/7: Atualizando sistema + pacotes + JDK"
   sudo apt update && sudo apt upgrade -y
+  # libgdbm6/libgdbm6t64 e libsmbclient/libsmbclient0 mudam de nome entre versões do Ubuntu;
+  # libgdbm-dev e smbclient/python3-smbc já puxam a variante certa como dependência.
   sudo apt install -y git build-essential curl wget default-jre imagemagick openssh-server \
   mysql-server libmysqlclient-dev redis-server bison libssl-dev libyaml-dev libreadline-dev \
-  zlib1g-dev libncurses-dev libffi-dev libgdbm6t64 libgdbm-dev nginx dirmngr gnupg \
-  samba smbclient libsmbclient0 python3-smbc htop \
+  zlib1g-dev libncurses-dev libffi-dev libgdbm-dev nginx dirmngr gnupg \
+  samba smbclient python3-smbc htop \
   zenity zip unzip cups cron
 
   echo "Instalando Google Chrome (.deb, sem snap)..."
@@ -72,13 +87,20 @@ else
     sudo ln -sf /usr/bin/google-chrome /usr/local/bin/chromium
   fi
 
-  sudo apt install -y openjdk-21-jre openjdk-21-jdk
+  # No 20.04/22.04 o openjdk-21 só vem pelo repositório -updates; sem ele, usa o 17.
+  JAVA_VERSION=21
+  if ! apt-cache show openjdk-21-jdk >/dev/null 2>&1; then
+    echo "⚠️  openjdk-21 não disponível no Ubuntu $UBUNTU_VERSION. Usando openjdk-17."
+    JAVA_VERSION=17
+  fi
+  JAVA_HOME_DIR="/usr/lib/jvm/java-${JAVA_VERSION}-openjdk-amd64"
+  sudo apt install -y "openjdk-${JAVA_VERSION}-jre" "openjdk-${JAVA_VERSION}-jdk"
 
-  echo "Configurando Java 21 como padrão..."
-  sudo update-alternatives --install /usr/bin/java java /usr/lib/jvm/java-21-openjdk-amd64/bin/java 2100
-  sudo update-alternatives --install /usr/bin/javac javac /usr/lib/jvm/java-21-openjdk-amd64/bin/javac 2100
-  sudo update-alternatives --set java /usr/lib/jvm/java-21-openjdk-amd64/bin/java
-  sudo update-alternatives --set javac /usr/lib/jvm/java-21-openjdk-amd64/bin/javac
+  echo "Configurando Java $JAVA_VERSION como padrão..."
+  sudo update-alternatives --install /usr/bin/java java "$JAVA_HOME_DIR/bin/java" "${JAVA_VERSION}00"
+  sudo update-alternatives --install /usr/bin/javac javac "$JAVA_HOME_DIR/bin/javac" "${JAVA_VERSION}00"
+  sudo update-alternatives --set java "$JAVA_HOME_DIR/bin/java"
+  sudo update-alternatives --set javac "$JAVA_HOME_DIR/bin/javac"
 
   mark_step_done 1
 fi
@@ -249,9 +271,8 @@ else
 
   # O prince_11.4 (Ubuntu 18.04) depende de libssl1.1/libtiff5, que não existem mais.
   echo "Instalando Prince..."
-  . /etc/os-release
-  case "$VERSION_ID" in
-    20.04|22.04|24.04|26.04) PRINCE_UBUNTU="$VERSION_ID" ;;
+  case "$UBUNTU_VERSION" in
+    20.04|22.04|24.04|26.04) PRINCE_UBUNTU="$UBUNTU_VERSION" ;;
     *) PRINCE_UBUNTU="24.04" ;;
   esac
   PRINCE_DEB="/tmp/prince_16.2-1_ubuntu${PRINCE_UBUNTU}_amd64.deb"
