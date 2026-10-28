@@ -183,6 +183,13 @@ EOF
 fi
 echo
 
+# Ao retomar depois do PASSO 3, o rbenv não está no PATH (o script não lê o ~/.bashrc);
+# sem isso os passos 5 e 7 não acham gem/bundle.
+if [ -x "$HOME/.rbenv/bin/rbenv" ]; then
+  export PATH="$HOME/.rbenv/bin:$PATH"
+  eval "$(rbenv init -)"
+fi
+
 # ====================== PASSO 4/7 ======================
 if is_step_done 4; then
   echo "PASSO 4/7 já concluído anteriormente. Pulando..."
@@ -356,11 +363,15 @@ else
   rm -f /tmp/ncommerce-api /tmp/ncommerce
 
   mv /tmp/ncommerce-env /home/${LINUX_USER}/NCommerce/ncommerce_api/.env.production
-  sudo bash -c "cat /home/${LINUX_USER}/NCommerce/ncommerce_api/.env.production >> /etc/environment"
+  # Só acrescenta as linhas que ainda não estão lá, para o passo poder ser repetido.
+  (grep -vxF -f /etc/environment /home/${LINUX_USER}/NCommerce/ncommerce_api/.env.production || true) | \
+    sudo tee -a /etc/environment >/dev/null
 
   chmod o+x /home/${LINUX_USER} # newer nginx requires this
   cd ~/NCommerce/ncommerce_api
-  sudo mysql < ./essentials/setup_scripts/mysql-setup.sql
+  if [ -z "$(sudo mysql -N -e "SELECT 1 FROM mysql.user WHERE user='ncommerce' AND host='localhost'")" ]; then
+    sudo mysql < ./essentials/setup_scripts/mysql-setup.sql
+  fi
   bundle exec rake db:create db:migrate db:seed RAILS_ENV=production
   sudo service nginx restart
 
