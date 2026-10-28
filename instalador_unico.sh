@@ -363,6 +363,11 @@ else
   rm -f /tmp/ncommerce-api /tmp/ncommerce
 
   mv /tmp/ncommerce-env /home/${LINUX_USER}/NCommerce/ncommerce_api/.env.production
+  # O .env do servidor não traz SECRET_KEY_BASE, e o Rails 7.2 não sobe em produção sem ela.
+  if ! grep -q '^SECRET_KEY_BASE=.' /home/${LINUX_USER}/NCommerce/ncommerce_api/.env.production; then
+    sed -i '/^SECRET_KEY_BASE=/d' /home/${LINUX_USER}/NCommerce/ncommerce_api/.env.production
+    echo "SECRET_KEY_BASE=$(openssl rand -hex 64)" >> /home/${LINUX_USER}/NCommerce/ncommerce_api/.env.production
+  fi
   # Só acrescenta as linhas que ainda não estão lá, para o passo poder ser repetido.
   (grep -vxF -f /etc/environment /home/${LINUX_USER}/NCommerce/ncommerce_api/.env.production || true) | \
     sudo tee -a /etc/environment >/dev/null
