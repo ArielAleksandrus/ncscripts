@@ -36,6 +36,19 @@ read_code() {
   done
 }
 
+ensure_download_tools() {
+  if command -v curl >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "Preciso de curl e python3. Instale os dois e rode de novo."
+    exit 1
+  fi
+  echo "Instalando curl e python3..."
+  sudo apt-get update
+  sudo apt-get install -y curl python3 ca-certificates
+}
+
 machine_id() {
   local dir="$HOME/.ncommerce-docker" file
   file="$dir/machine-id"
@@ -53,10 +66,7 @@ machine_id() {
 
 redeem() {
   local code="$1" body http mid host
-  if ! command -v python3 >/dev/null 2>&1; then
-    echo "Preciso do python3 para ler a resposta do mestre."
-    exit 1
-  fi
+  ensure_download_tools
   mid="$(machine_id)"
   host="$(hostname | tr -cd 'A-Za-z0-9.-' | cut -c1-100)"
   body="$(mktemp)"
