@@ -253,6 +253,7 @@ Copy-Item $updateSrc (Join-Path $InstallDir "ncommerce-docker-update.bat") -Forc
 
 $envFile = Join-Path $InstallDir ".env"
 $registry = $env:NCOMMERCE_REGISTRY
+if (-not $registry) { $registry = [string]$grant.registry }
 if (-not $registry) { $registry = Read-EnvValue $envFile "NCOMMERCE_REGISTRY" "ncommerce.app:5050" }
 $tag = $env:NCOMMERCE_TAG
 if (-not $tag) { $tag = Read-EnvValue $envFile "NCOMMERCE_TAG" "latest" }
@@ -271,6 +272,11 @@ $startup = Join-Path $InstallDir "ncommerce-docker-startup.bat"
 Write-Host "Registrando a tarefa de logon $TaskName ..."
 & schtasks.exe /create /tn $TaskName /tr $startup /sc onlogon /rl LIMITED /f | Out-Null
 if ($LASTEXITCODE -ne 0) { Fail "Nao consegui criar a tarefa $TaskName." }
+
+if (-not $grant.company) { Fail "O resgate nao trouxe o nome da empresa para entrar no registry." }
+Write-Host "Entrando no registry $registry como $($grant.company)..."
+$ncommerceToken | & $DockerExe login $registry --username ([string]$grant.company) --password-stdin
+if ($LASTEXITCODE -ne 0) { Fail "docker login falhou." }
 
 Write-Host "Baixando as imagens e subindo a stack..."
 $ErrorActionPreference = "Continue"

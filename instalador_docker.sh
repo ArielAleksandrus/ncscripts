@@ -23,6 +23,32 @@ if [ ! -f "$ROOT/docker/docker-compose.yml" ]; then
   exit 1
 fi
 
+if ! command -v sudo >/dev/null 2>&1; then
+  echo "Preciso do sudo."
+  exit 1
+fi
+sudo -v
+
+ensure_base_packages() {
+  local missing=() cmd
+  for cmd in curl python3 git ssh unzip ss hostname; do
+    command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
+  done
+  if [ "${#missing[@]}" -eq 0 ]; then
+    return 0
+  fi
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "Faltam comandos: ${missing[*]}. Instale e rode de novo."
+    exit 1
+  fi
+  echo "Instalando curl, python3, git, ssh, unzip e ss..."
+  sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get update
+  sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y \
+    curl python3 ca-certificates git openssh-client unzip iproute2 hostname
+}
+
+ensure_base_packages
+
 read_code() {
   local raw code
   while true; do
@@ -34,19 +60,6 @@ read_code() {
     fi
     echo "Use 8 letras ou numeros." >&2
   done
-}
-
-ensure_download_tools() {
-  if command -v curl >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
-    return 0
-  fi
-  if ! command -v apt-get >/dev/null 2>&1; then
-    echo "Preciso de curl e python3. Instale os dois e rode de novo."
-    exit 1
-  fi
-  echo "Instalando curl e python3..."
-  sudo apt-get update
-  sudo apt-get install -y curl python3 ca-certificates
 }
 
 machine_id() {
@@ -65,43 +78,64 @@ machine_id() {
 }
 
 redeem() {
-  local code="$1" body http mid host
-  ensure_download_tools
+  local code="$1" body http mid host grant
   mid="$(machine_id)"
   host="$(hostname | tr -cd 'A-Za-z0-9.-' | cut -c1-100)"
   body="$(mktemp)"
   http="$(curl -sS -o "$body" -w "%{http_code}" --max-time 30 \
     -X POST -H "Content-Type: application/json" \
     -d "{\"code\":\"${code}\",\"machine_id\":\"${mid}\",\"hostname\":\"${host}\"}" \
-    "${MASTER_URL}/install/redeem" || true)"
-  if [ "$http" != "200" ]; then
+    "${MASTER_URL}/install/redeem")" || {
     rm -f "$body"
-    echo "Codigo recusado (HTTP ${http}). Invalido, expirado, ja usado em outro PC, ou o mestre ainda nao tem a access key."
+    echo "Nao consegui falar com ${MASTER_URL}. Confira a rede e se o mestre esta no ar."
+    exit 1
+  }
+  if [ "$http" != "200" ]; then
+    echo "Codigo recusado (HTTP ${http})."
+    if [ -s "$body" ]; then
+      head -c 500 "$body" >&2 || true
+      echo >&2
+    fi
+    rm -f "$body"
     exit 1
   fi
   KEY_FILE="$(mktemp)"
   chmod 600 "$KEY_FILE"
-  NCOMMERCE_TOKEN="$(python3 - "$body" "$KEY_FILE" <<'PY' || true
+  grant="$(python3 - "$body" "$KEY_FILE" <<'PY'
 import json, sys
 body_path, key_path = sys.argv[1], sys.argv[2]
 d = json.load(open(body_path))
 token = d.get("token") or d.get("ncommerce_token") or ""
 key = d.get("git_private_key") or ""
+company = d.get("company") or ""
+registry = d.get("registry") or ""
 if not isinstance(token, str):
     token = ""
 if not isinstance(key, str):
     key = ""
+if not isinstance(company, str):
+    company = ""
+if not isinstance(registry, str):
+    registry = ""
 key = key.replace("\r\n", "\n").replace("\r", "\n")
 if key and not key.endswith("\n"):
     key += "\n"
 open(key_path, "w").write(key)
-sys.stdout.write(token)
+sys.stdout.write("%s\n%s\n%s" % (token, company, registry))
 PY
 )"
   rm -f "$body"
+  NCOMMERCE_TOKEN="$(printf '%s\n' "$grant" | sed -n '1p')"
+  COMPANY_NAME="$(printf '%s\n' "$grant" | sed -n '2p')"
+  REGISTRY_FROM_MASTER="$(printf '%s\n' "$grant" | sed -n '3p')"
   if [ -z "${NCOMMERCE_TOKEN}" ] || ! grep -q "PRIVATE KEY" "$KEY_FILE"; then
     rm -f "$KEY_FILE"
     echo "A resposta do mestre nao trouxe o token do ncommerce e a chave de leitura."
+    exit 1
+  fi
+  if [ -z "${COMPANY_NAME}" ]; then
+    rm -f "$KEY_FILE"
+    echo "A resposta do mestre nao trouxe o nome da empresa para entrar no registry."
     exit 1
   fi
 }
@@ -248,8 +282,9 @@ cleanup_secrets
 if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
   echo "Instalando Docker Engine..."
   if command -v apt-get >/dev/null 2>&1; then
-    sudo apt-get update
-    sudo apt-get install -y docker.io docker-compose-v2 || sudo apt-get install -y docker.io || true
+    sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get update
+    sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y docker.io docker-compose-v2 \
+      || sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y docker.io || true
   fi
 fi
 
@@ -276,7 +311,7 @@ fi
 
 file_registry="$(read_env_key "$INSTALL_DIR/.env" NCOMMERCE_REGISTRY)"
 file_tag="$(read_env_key "$INSTALL_DIR/.env" NCOMMERCE_TAG)"
-REGISTRY="${REQUESTED_REGISTRY:-${file_registry:-ncommerce.app:5050}}"
+REGISTRY="${REQUESTED_REGISTRY:-${file_registry:-${REGISTRY_FROM_MASTER:-ncommerce.app:5050}}}"
 TAG="${REQUESTED_TAG:-${file_tag:-latest}}"
 
 sudo mkdir -p "$INSTALL_DIR"
@@ -296,6 +331,10 @@ if command -v ufw >/dev/null 2>&1 && sudo ufw status | grep -q "Status: active";
 fi
 
 cd "$INSTALL_DIR"
+echo "Entrando no registry ${REGISTRY} como ${COMPANY_NAME}..."
+sudo -v
+printf '%s' "$NCOMMERCE_TOKEN" | sudo -n docker login "$REGISTRY" --username "$COMPANY_NAME" --password-stdin
+
 sudo docker compose pull
 sudo docker compose up -d
 
