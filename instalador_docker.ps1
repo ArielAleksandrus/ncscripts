@@ -1,0 +1,320 @@
+#Requires -RunAsAdministrator
+<#
+  Instalador Docker do NCommerce no Windows.
+
+  Pede um codigo de 8 caracteres. O mestre troca esse codigo, uma vez,
+  pelo token da empresa e pela chave privada de leitura (access key SSH).
+  A chave e apagada depois do clone.
+  Reexecutar nao apaga volume.
+#>
+
+$ErrorActionPreference = "Stop"
+$InstallDir = "C:\NCommerce"
+$TaskName = "NCommerce Docker Startup"
+if ($env:NCOMMERCE_MASTER_URL) {
+    $MasterUrl = $env:NCOMMERCE_MASTER_URL
+} else {
+    $MasterUrl = "https://ncommerce.app:3001"
+}
+$DockerExe = Join-Path $env:ProgramFiles "Docker\Docker\resources\bin\docker.exe"
+$DockerDesktop = Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"
+$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+function Fail($msg) {
+    Remove-Secrets
+    Write-Host ""
+    Write-Host "ERRO: $msg" -ForegroundColor Red
+    Read-Host "Pressione Enter para sair"
+    exit 1
+}
+
+function Read-InstallCode {
+    while ($true) {
+        $raw = Read-Host "Codigo de instalacao (8 caracteres)"
+        $code = (($raw -replace "[\s\-]", "").ToUpper())
+        if ($code -match "^[A-Z0-9]{8}$") { return $code }
+        Write-Host "Use 8 letras ou numeros."
+    }
+}
+
+function Get-MachineId {
+    $dir = Join-Path $env:ProgramData "NCommerce"
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $file = Join-Path $dir "machine-id"
+    if (-not (Test-Path $file)) {
+        [guid]::NewGuid().ToString() | Set-Content -Path $file -NoNewline -Encoding ascii
+    }
+    return (Get-Content -Raw -Path $file).Trim()
+}
+
+function Get-InstallGrant([string]$Code) {
+    $machineId = Get-MachineId
+    $payloadFile = New-TemporaryFile
+    $bodyFile = New-TemporaryFile
+    $payload = @{ code = $Code; machine_id = $machineId; hostname = $env:COMPUTERNAME } | ConvertTo-Json -Compress
+    [System.IO.File]::WriteAllText($payloadFile.FullName, $payload)
+    $ErrorActionPreference = "Continue"
+    $http = & curl.exe -sS -o $bodyFile.FullName -w "%{http_code}" --max-time 30 `
+        -X POST -H "Content-Type: application/json" --data-binary "@$($payloadFile.FullName)" `
+        "$MasterUrl/install/redeem"
+    $curlCode = $LASTEXITCODE
+    $ErrorActionPreference = "Stop"
+    Remove-Item $payloadFile.FullName -Force -ErrorAction SilentlyContinue
+    if ($curlCode -ne 0 -or $http -ne "200") {
+        Remove-Item $bodyFile.FullName -Force -ErrorAction SilentlyContinue
+        Fail "Codigo recusado (HTTP $http). Invalido, expirado, ja usado em outro PC, ou o mestre ainda nao tem a access key."
+    }
+    try {
+        $grant = Get-Content -Raw -Path $bodyFile.FullName | ConvertFrom-Json
+    } catch {
+        Remove-Item $bodyFile.FullName -Force -ErrorAction SilentlyContinue
+        Fail "Resposta do mestre nao e o codigo de instalacao."
+    }
+    Remove-Item $bodyFile.FullName -Force
+    if (-not $grant.token) { $grant | Add-Member -NotePropertyName token -NotePropertyValue $grant.ncommerce_token -Force }
+    if (-not $grant.token -or -not $grant.git_private_key) {
+        Fail "A resposta do mestre nao trouxe o token do ncommerce e a chave de leitura."
+    }
+    return $grant
+}
+
+function Save-CompanyBackup([string]$Code) {
+    $machineId = Get-MachineId
+    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+    $dest = Join-Path $InstallDir "ncommerce.zip"
+    $ErrorActionPreference = "Continue"
+    $http = & curl.exe -sS -o $dest -w "%{http_code}" --max-time 600 `
+        "$MasterUrl/install/$Code/backup?machine_id=$machineId"
+    $curlCode = $LASTEXITCODE
+    $ErrorActionPreference = "Stop"
+    if ($http -eq "204") {
+        Remove-Item $dest -Force -ErrorAction SilentlyContinue
+        Write-Host "Esta empresa nao tem backup no mestre. A instalacao segue vazia."
+        return
+    }
+    if ($curlCode -ne 0 -or $http -ne "200") {
+        Remove-Item $dest -Force -ErrorAction SilentlyContinue
+        Fail "Nao consegui baixar o backup (HTTP $http)."
+    }
+    Write-Host "Backup baixado em $dest."
+    Write-Host "A senha do zip sao os 6 primeiros caracteres do token, que o instalador ja enviou para a API."
+}
+
+$script:SecretFiles = @()
+
+function Remove-Secrets {
+    foreach ($f in $script:SecretFiles) {
+        if ($f -and (Test-Path $f)) {
+            Remove-Item $f -Force -ErrorAction SilentlyContinue
+        }
+    }
+    $script:SecretFiles = @()
+    Remove-Item Env:GIT_SSH_COMMAND -ErrorAction SilentlyContinue
+}
+
+function Test-DockerReady {
+    if (-not (Test-Path $DockerExe)) { return $false }
+    $ErrorActionPreference = "Continue"
+    & $DockerExe info *> $null
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Read-EnvValue([string]$Path, [string]$Key, [string]$Default) {
+    if (-not (Test-Path $Path)) { return $Default }
+    foreach ($line in Get-Content -Path $Path) {
+        if ($line -like "$Key=*") { return $line.Substring($Key.Length + 1) }
+    }
+    return $Default
+}
+
+function Install-GitIfMissing {
+    if (Get-Command git.exe -ErrorAction SilentlyContinue) { return }
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Fail "Git nao esta instalado e o winget nao existe."
+    }
+    Write-Host "Instalando Git..."
+    & winget install --exact --id Git.Git --accept-package-agreements --accept-source-agreements --disable-interactivity
+    $machine = [Environment]::GetEnvironmentVariable("Path", "Machine")
+    $user = [Environment]::GetEnvironmentVariable("Path", "User")
+    $env:Path = "$machine;$user"
+    if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) {
+        Fail "Git nao ficou no PATH. Feche a janela e rode o instalador de novo."
+    }
+}
+
+function Find-Ssh {
+    $candidates = @(
+        (Join-Path $env:ProgramFiles "Git\usr\bin\ssh.exe"),
+        (Join-Path $env:WINDIR "System32\OpenSSH\ssh.exe")
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) { return $candidate }
+    }
+    $cmd = Get-Command ssh.exe -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    return $null
+}
+
+function Clone-Repos([string]$GitKey) {
+    Install-GitIfMissing
+    $ssh = Find-Ssh
+    if (-not $ssh) { Fail "Nao achei o ssh. Instale o Git for Windows e rode de novo." }
+    $src = Join-Path $InstallDir "src"
+    New-Item -ItemType Directory -Force -Path $src | Out-Null
+
+    $keyText = $GitKey -replace "`r`n", "`n" -replace "`r", "`n"
+    if (-not $keyText.EndsWith("`n")) { $keyText += "`n" }
+    $keyFile = New-TemporaryFile
+    $knownFile = New-TemporaryFile
+    $script:SecretFiles += @($keyFile.FullName, $knownFile.FullName)
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($keyFile.FullName, $keyText, $utf8)
+    & icacls.exe $keyFile.FullName /inheritance:r | Out-Null
+    & icacls.exe $keyFile.FullName /grant:r "${env:USERNAME}:(R)" | Out-Null
+
+    $keyscan = Join-Path (Split-Path $ssh) "ssh-keyscan.exe"
+    if (-not (Test-Path $keyscan)) { $keyscan = "ssh-keyscan.exe" }
+    $ErrorActionPreference = "Continue"
+    $scan = & $keyscan -T 10 -t ed25519,rsa bitbucket.org 2>$null
+    $ErrorActionPreference = "Stop"
+    if (-not $scan) { Fail "Nao consegui obter a chave do servidor bitbucket.org." }
+    [System.IO.File]::WriteAllText($knownFile.FullName, (($scan | Out-String).Trim() + "`n"), $utf8)
+
+    $env:GIT_SSH_COMMAND = "`"$ssh`" -i `"$($keyFile.FullName)`" -o IdentitiesOnly=yes -o UserKnownHostsFile=`"$($knownFile.FullName)`" -o StrictHostKeyChecking=yes"
+    $env:GIT_TERMINAL_PROMPT = "0"
+    foreach ($repo in @("ncommerce_api", "ncommerce", "nfce")) {
+        $dest = Join-Path $src $repo
+        if (Test-Path (Join-Path $dest ".git")) {
+            Write-Host "$repo ja esta em $dest"
+            continue
+        }
+        if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+        Write-Host "Clonando $repo..."
+        $ErrorActionPreference = "Continue"
+        & git.exe clone --quiet "git@bitbucket.org:Aleksandrus/$repo.git" $dest
+        $cloneCode = $LASTEXITCODE
+        $ErrorActionPreference = "Stop"
+        if ($cloneCode -ne 0) {
+            if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+            Fail "Nao consegui clonar $repo. A chave de leitura do Bitbucket foi recusada."
+        }
+    }
+    Remove-Secrets
+}
+
+$installCode = Read-InstallCode
+$grant = Get-InstallGrant $installCode
+$ncommerceToken = [string]$grant.token
+$gitKey = [string]$grant.git_private_key
+Clone-Repos $gitKey
+$gitKey = $null
+
+if (-not (Test-Path $DockerExe)) {
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Fail "Docker Desktop nao esta instalado e o winget nao existe. Instale o Docker Desktop e rode este arquivo de novo."
+    }
+    Write-Host "Instalando Docker Desktop. Isso pode levar varios minutos."
+    & winget install --exact --id Docker.DockerDesktop --accept-package-agreements --accept-source-agreements --disable-interactivity
+    if (-not (Test-Path $DockerExe)) {
+        Fail "Docker Desktop nao apareceu. Se o Windows pediu reinicio, reinicie e rode o instalador de novo."
+    }
+}
+
+if (-not (Test-DockerReady)) {
+    if (Test-Path $DockerDesktop) { Start-Process $DockerDesktop }
+    Write-Host "Esperando o Docker Desktop ficar pronto..."
+    $ready = $false
+    for ($i = 0; $i -lt 60; $i++) {
+        if (Test-DockerReady) { $ready = $true; break }
+        Start-Sleep -Seconds 5
+    }
+    if (-not $ready) {
+        Fail "O Docker nao ficou pronto. Abra o Docker Desktop, conclua o primeiro uso e rode este instalador de novo."
+    }
+}
+
+$cupsPort = 631
+$listen = Get-NetTCPConnection -LocalPort 631 -State Listen -ErrorAction SilentlyContinue
+if ($listen) {
+    $cupsPort = 6631
+    Write-Host "A porta 631 ja esta em uso. O CUPS do container fica em http://127.0.0.1:6631."
+}
+
+$composeSrc = Join-Path $Root "docker\docker-compose.yml"
+$startupSrc = Join-Path $Root "windows\ncommerce-docker-startup.bat"
+$updateSrc = Join-Path $Root "windows\ncommerce-docker-update.bat"
+if (-not (Test-Path $composeSrc)) { Fail "Nao achei $composeSrc." }
+if (-not (Test-Path $startupSrc)) { Fail "Nao achei $startupSrc." }
+
+New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+Copy-Item $composeSrc (Join-Path $InstallDir "docker-compose.yml") -Force
+Copy-Item $startupSrc (Join-Path $InstallDir "ncommerce-docker-startup.bat") -Force
+Copy-Item $updateSrc (Join-Path $InstallDir "ncommerce-docker-update.bat") -Force
+
+$envFile = Join-Path $InstallDir ".env"
+$registry = $env:NCOMMERCE_REGISTRY
+if (-not $registry) { $registry = Read-EnvValue $envFile "NCOMMERCE_REGISTRY" "ncommerce.app:5050" }
+$tag = $env:NCOMMERCE_TAG
+if (-not $tag) { $tag = Read-EnvValue $envFile "NCOMMERCE_TAG" "latest" }
+$envBody = "CUPS_PORT=$cupsPort`nNCOMMERCE_REGISTRY=$registry`nNCOMMERCE_TAG=$tag`n"
+[System.IO.File]::WriteAllText($envFile, $envBody)
+
+foreach ($port in @(3000, 4200)) {
+    $name = "NCommerce TCP $port"
+    $existing = Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue
+    if (-not $existing) {
+        New-NetFirewallRule -DisplayName $name -Direction Inbound -Protocol TCP -LocalPort $port -Action Allow | Out-Null
+    }
+}
+
+$startup = Join-Path $InstallDir "ncommerce-docker-startup.bat"
+Write-Host "Registrando a tarefa de logon $TaskName ..."
+& schtasks.exe /create /tn $TaskName /tr $startup /sc onlogon /rl LIMITED /f | Out-Null
+if ($LASTEXITCODE -ne 0) { Fail "Nao consegui criar a tarefa $TaskName." }
+
+Write-Host "Baixando as imagens e subindo a stack..."
+$ErrorActionPreference = "Continue"
+Push-Location $InstallDir
+& $DockerExe compose pull
+if ($LASTEXITCODE -ne 0) {
+    Pop-Location
+    Fail "docker compose pull falhou."
+}
+& $DockerExe compose up -d
+$upCode = $LASTEXITCODE
+Pop-Location
+$ErrorActionPreference = "Stop"
+if ($upCode -ne 0) { Fail "docker compose up falhou." }
+
+Write-Host "Esperando a API para gravar o token..."
+$apiReady = $false
+for ($i = 0; $i -lt 40; $i++) {
+    $ErrorActionPreference = "Continue"
+    & curl.exe -sf -m 3 -o NUL "http://127.0.0.1:3000/api/v1/docker_setup"
+    if ($LASTEXITCODE -eq 0) { $apiReady = $true; break }
+    $ErrorActionPreference = "Stop"
+    Start-Sleep -Seconds 3
+}
+if (-not $apiReady) { Fail "A API nao respondeu em http://127.0.0.1:3000. Os containers subiram; o token ainda nao foi gravado." }
+
+$payloadFile = New-TemporaryFile
+[System.IO.File]::WriteAllText($payloadFile.FullName, (@{ token = $ncommerceToken } | ConvertTo-Json -Compress))
+$ErrorActionPreference = "Continue"
+& curl.exe -sf -m 40 -H "Content-Type: application/json" --data-binary "@$($payloadFile.FullName)" "http://127.0.0.1:3000/api/v1/docker_setup" | Out-Null
+$postCode = $LASTEXITCODE
+$ErrorActionPreference = "Stop"
+Remove-Item $payloadFile.FullName -Force
+$ncommerceToken = $null
+if ($postCode -ne 0) { Fail "A API recusou o token." }
+
+Save-CompanyBackup $installCode
+
+Write-Host ""
+Write-Host "NCommerce no ar."
+Write-Host "  Site:  http://localhost:4200"
+Write-Host "  API:   http://localhost:3000"
+Write-Host "  CUPS:  http://127.0.0.1:$cupsPort"
+Write-Host "Codigo-fonte em C:\NCommerce\src (ncommerce_api, ncommerce, nfce)."
+Write-Host "A tarefa '$TaskName' sobe a stack quando alguem entra no Windows."
+Write-Host "Depois de uma queda de energia o PC precisa logar sozinho: netplwiz."
+Write-Host "Atualizar as imagens: C:\NCommerce\ncommerce-docker-update.bat"

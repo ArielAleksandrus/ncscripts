@@ -4,3 +4,4 @@
 # cmd.exe misparses LF-only batch files in some cases.
 *.bat text eol=crlf
 *.ps1 text eol=crlf
+docker/docker-compose.yml text eol=lf

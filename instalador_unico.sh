@@ -51,13 +51,139 @@ KEEP_ALIVE_PID=$!
 trap 'kill $KEEP_ALIVE_PID 2>/dev/null || true' EXIT
 
 # ====================== DADOS ======================
-read -p "Digite o TOKEN do NCommerce: " TOKEN
+# O tecnico digita o codigo de 8 caracteres. O mestre devolve o token e a
+# access key do Bitbucket. O token fica neste arquivo para o passo 7 e para
+# uma instalacao retomada.
+INSTALL_CODE_FILE="$PROGRESS_DIR/install-code"
+TOKEN_FILE="$PROGRESS_DIR/token"
+MACHINE_FILE="$PROGRESS_DIR/machine-id"
+KEY_FILE="$PROGRESS_DIR/git-read-key"
+MASTER_URL="${NCOMMERCE_MASTER_URL:-https://ncommerce.app:3001}"
 
-if [ -z "$TOKEN" ]; then
-  echo "❌ Token não informado!"
-  exit 1
+read_install_code() {
+  local raw code
+  while true; do
+    read -r -p "Codigo de instalacao (8 caracteres): " raw
+    code="$(printf '%s' "$raw" | tr -d '[:space:]-' | tr '[:lower:]' '[:upper:]')"
+    if printf '%s' "$code" | grep -Eq '^[A-Z0-9]{8}$'; then
+      printf '%s' "$code" > "$INSTALL_CODE_FILE"
+      chmod 600 "$INSTALL_CODE_FILE"
+      return 0
+    fi
+    echo "Use 8 letras ou numeros."
+  done
+}
+
+if [ ! -s "$TOKEN_FILE" ] && [ ! -s "$INSTALL_CODE_FILE" ]; then
+  read_install_code
 fi
 echo "Usuário Linux: $LINUX_USER"
+
+redeem_install_code() {
+  if [ -s "$TOKEN_FILE" ] && { is_step_done 4 || [ -s "$KEY_FILE" ]; }; then
+    TOKEN="$(tr -d '[:space:]' < "$TOKEN_FILE")"
+    return 0
+  fi
+  if [ ! -s "$INSTALL_CODE_FILE" ]; then
+    echo "❌ Codigo de instalacao ausente. Rode de novo e informe o codigo de 8 caracteres."
+    exit 1
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    sudo apt-get update
+    sudo apt-get install -y python3
+  fi
+  if [ ! -s "$MACHINE_FILE" ]; then
+    if [ -r /proc/sys/kernel/random/uuid ]; then
+      tr -d '[:space:]' < /proc/sys/kernel/random/uuid > "$MACHINE_FILE"
+    else
+      openssl rand -hex 16 > "$MACHINE_FILE"
+    fi
+    chmod 600 "$MACHINE_FILE"
+  fi
+  python3 - "$MASTER_URL" "$INSTALL_CODE_FILE" "$MACHINE_FILE" "$TOKEN_FILE" "$KEY_FILE" <<'PY'
+import json, socket, sys, urllib.error, urllib.request
+master, code_path, machine_path, token_path, key_path = sys.argv[1:]
+code = open(code_path).read().strip()
+machine = open(machine_path).read().strip()
+host = "".join(ch for ch in socket.gethostname() if ch.isalnum() or ch in ".-")[:100]
+payload = json.dumps({"code": code, "machine_id": machine, "hostname": host}).encode()
+req = urllib.request.Request(
+    master.rstrip("/") + "/install/redeem",
+    data=payload,
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+try:
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        raw = resp.read()
+except urllib.error.HTTPError as exc:
+    sys.stderr.write("Codigo recusado (HTTP %s). %s\n" % (exc.code, exc.read().decode("utf-8", "replace")))
+    sys.exit(1)
+except Exception as exc:
+    sys.stderr.write("Nao consegui falar com o mestre: %s\n" % exc)
+    sys.exit(1)
+try:
+    data = json.loads(raw.decode())
+except Exception:
+    sys.stderr.write("Resposta do mestre nao e JSON.\n")
+    sys.exit(1)
+token = data.get("token") or data.get("ncommerce_token") or ""
+key = data.get("git_private_key") or ""
+if not isinstance(token, str):
+    token = ""
+if not isinstance(key, str):
+    key = ""
+key = key.replace("\r\n", "\n").replace("\r", "\n")
+if key and not key.endswith("\n"):
+    key += "\n"
+if not token or "PRIVATE KEY" not in key:
+    sys.stderr.write("A resposta do mestre nao trouxe o token e a chave de leitura.\n")
+    sys.exit(1)
+open(token_path, "w").write(token + "\n")
+open(key_path, "w").write(key)
+PY
+  chmod 600 "$TOKEN_FILE" "$KEY_FILE"
+  if is_step_done 4; then
+    shred -u "$KEY_FILE" 2>/dev/null || rm -f "$KEY_FILE"
+  fi
+  TOKEN="$(tr -d '[:space:]' < "$TOKEN_FILE")"
+}
+
+download_company_backup() {
+  BACKUP_ZIP="$PROGRESS_DIR/ncommerce.zip"
+  if [ -f "$PROGRESS_DIR/backup-restored" ]; then
+    return 0
+  fi
+  rm -f "$BACKUP_ZIP"
+  if [ ! -s "$INSTALL_CODE_FILE" ]; then
+    echo "Codigo de instalacao ja foi apagado. Sem download do backup do mestre."
+    return 0
+  fi
+  python3 - "$MASTER_URL" "$INSTALL_CODE_FILE" "$MACHINE_FILE" "$BACKUP_ZIP" <<'PY'
+import sys, urllib.error, urllib.request
+master, code_path, machine_path, dest = sys.argv[1:]
+code = open(code_path).read().strip()
+machine = open(machine_path).read().strip()
+url = "%s/install/%s/backup?machine_id=%s" % (master.rstrip("/"), code, machine)
+req = urllib.request.Request(url)
+try:
+    with urllib.request.urlopen(req, timeout=600) as resp:
+        if resp.status == 204:
+            sys.exit(0)
+        open(dest, "wb").write(resp.read())
+except urllib.error.HTTPError as exc:
+    if exc.code == 204:
+        sys.exit(0)
+    sys.stderr.write("Nao consegui baixar o backup (HTTP %s).\n" % exc.code)
+    sys.exit(1)
+PY
+  if [ -s "$BACKUP_ZIP" ]; then
+    echo "Backup baixado em ${BACKUP_ZIP}."
+  else
+    echo "Esta empresa nao tem backup no mestre. A instalacao segue vazia."
+    rm -f "$BACKUP_ZIP"
+  fi
+}
 
 echo "🚀 Iniciando instalação (resumível)..."
 echo
@@ -70,7 +196,7 @@ else
   sudo apt update && sudo apt upgrade -y
   # libgdbm6/libgdbm6t64 e libsmbclient/libsmbclient0 mudam de nome entre versões do Ubuntu;
   # libgdbm-dev e smbclient/python3-smbc já puxam a variante certa como dependência.
-  sudo apt install -y git build-essential curl wget default-jre imagemagick openssh-server \
+  sudo apt install -y git build-essential curl wget python3 default-jre imagemagick openssh-server \
   mysql-server libmysqlclient-dev redis-server bison libssl-dev libyaml-dev libreadline-dev \
   zlib1g-dev libncurses-dev libffi-dev libgdbm-dev nginx dirmngr gnupg \
   samba smbclient python3-smbc htop \
@@ -131,6 +257,8 @@ else
 fi
 echo
 
+redeem_install_code
+
 # ====================== PASSO 2/7 ======================
 if is_step_done 2; then
   echo "PASSO 2/7 já concluído anteriormente. Pulando..."
@@ -187,7 +315,7 @@ EOF
   echo "══════════════════════════════════════════════════════════════"
   echo "Dropbox foi iniciado. Faca login na CONTA DA EMPRESA."
   echo "Depois: preferencias -> Sync -> desmarque pastas de terceiros."
-  echo "O atalho Restauracao na area de trabalho usa o ncommerce.zip do Dropbox."
+  echo "Se a empresa ja tem backup, o instalador baixa o zip do servidor mestre no final."
   echo "══════════════════════════════════════════════════════════════"
   read -r -p "Pressione ENTER depois de logar no Dropbox (ou ENTER para seguir sem backup)..."
 
@@ -198,12 +326,12 @@ EOF
 
   echo ""
   echo "══════════════════════════════════════════════════════════════"
-  echo "🔑 COPIE A CHAVE PÚBLICA ABAIXO e adicione no Bitbucket E no servidor Nlabs (authorized_keys do usuário nlabs em tunnel.nlabs.live):"
+  echo "🔑 COPIE A CHAVE PÚBLICA ABAIXO e adicione no servidor Nlabs (authorized_keys do usuário nlabs em tunnel.nlabs.live):"
   echo ""
   cat ~/.ssh/id_rsa.pub
   echo ""
   echo "══════════════════════════════════════════════════════════════"
-  read -r -p "✅ Pressione ENTER quando a chave já estiver adicionada no Bitbucket e no servidor Nlabs..."
+  read -r -p "✅ Pressione ENTER quando a chave já estiver adicionada no servidor Nlabs..."
   mark_step_done 3
 fi
 echo
@@ -228,13 +356,17 @@ else
     ssh-keyscan -H bitbucket.org >> ~/.ssh/known_hosts 2>/dev/null
   fi
 
+  if [ ! -s "$KEY_FILE" ]; then
+    echo "❌ Chave de leitura do Bitbucket ausente. Rode de novo com o codigo de instalacao."
+    exit 1
+  fi
+  export GIT_SSH_COMMAND="ssh -i ${KEY_FILE} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
   for repo in ncommerce_api ncommerce sefaz-chrome-extension nfce; do
     if [ ! -d "$repo/.git" ]; then
       echo "Clonando $repo..."
       if ! git clone "git@bitbucket.org:Aleksandrus/$repo.git"; then
         echo ""
-        echo "❌ Não consegui clonar $repo. Confira se a chave abaixo está no Bitbucket:"
-        cat ~/.ssh/id_rsa.pub
+        echo "❌ Não consegui clonar $repo. A access key de leitura do Bitbucket foi recusada."
         echo "Depois rode ./instalador_unico.sh de novo (ele continua deste passo)."
         exit 1
       fi
@@ -242,6 +374,8 @@ else
       echo "✅ $repo já existe. Pulando clone."
     fi
   done
+  unset GIT_SSH_COMMAND
+  shred -u "$KEY_FILE" 2>/dev/null || rm -f "$KEY_FILE"
 
   mark_step_done 4
 fi
@@ -402,7 +536,29 @@ else
   if [ -z "$(sudo mysql -N -e "SELECT 1 FROM mysql.user WHERE user='ncommerce' AND host='localhost'")" ]; then
     sudo mysql < ./essentials/setup_scripts/mysql-setup.sql
   fi
-  bundle exec rake db:create db:migrate db:seed RAILS_ENV=production
+  if [ -f "$PROGRESS_DIR/backup-restored" ]; then
+    echo "Backup ja restaurado. Pulando o banco vazio."
+  else
+    download_company_backup
+    if [ -s "${BACKUP_ZIP:-}" ]; then
+      if ! grep -q NCOMMERCE_ZIP_PASSWORD ./vendor/scripts/restore_backup.sh; then
+        echo "❌ O restore_backup.sh clonado ainda nao aceita a senha vinda do instalador."
+        echo "O zip ficou em ${BACKUP_ZIP}."
+        exit 1
+      fi
+      echo "Restaurando o backup desta empresa..."
+      NCOMMERCE_ZIP_PATH="$BACKUP_ZIP" \
+        NCOMMERCE_ZIP_PASSWORD="${TOKEN:0:6}" \
+        NCOMMERCE_SKIP_PAUSE=1 \
+        bash ./vendor/scripts/restore_backup.sh
+      if ! grep -q '^SECRET_KEY_BASE=.' .env.production; then
+        echo "SECRET_KEY_BASE=$(openssl rand -hex 64)" >> .env.production
+      fi
+      touch "$PROGRESS_DIR/backup-restored"
+    else
+      bundle exec rake db:create db:migrate db:seed RAILS_ENV=production
+    fi
+  fi
   sudo service nginx restart
 
   (crontab -l 2>/dev/null | grep -v "ncommerce_api/vendor/scripts" || true) > /tmp/crontab.tmp
@@ -417,6 +573,7 @@ EOF
   rm -f /tmp/crontab.tmp
   sudo service cron reload
 
+  shred -u "$INSTALL_CODE_FILE" 2>/dev/null || rm -f "$INSTALL_CODE_FILE"
   mark_step_done 7
 fi
 echo

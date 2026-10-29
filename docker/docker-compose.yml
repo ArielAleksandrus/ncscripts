@@ -1,0 +1,91 @@
+# Compose do restaurante. So imagens, sem build e sem codigo-fonte.
+# Mantenha servicos, portas e volumes iguais aos de ncommerce_api/docker-compose.yml.
+# Publicar versao nova: ncommerce_api/docker/release.sh
+# Subir aqui: docker compose pull && docker compose up -d
+
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-ncommerce_root}
+      MYSQL_DATABASE: ncommerce_api_production
+      MYSQL_USER: ncommerce
+      MYSQL_PASSWORD: ncommerce
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-ncommerce_root}", "--silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    image: ${NCOMMERCE_REGISTRY:-ncommerce.app:5050}/ncommerce/api:${NCOMMERCE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      RAILS_ENV: production
+      RAILS_LOG_TO_STDOUT: "1"
+      APP_ROOT: /app/ncommerce_api
+      DBHOST: mysql
+      DBPORT: "3306"
+      REDISHOST: redis
+      REDISPORT: "6379"
+      NCOMMERCE_API_DATABASE_USER: ncommerce
+      NCOMMERCE_API_DATABASE_PASSWORD: ncommerce
+      NFCE_JAR: /opt/nfce
+      NFCE_DATA: /data/nfce
+      COMPUTER_USER: root
+      BACKUP_DIR: /var/ncommerce/backups
+      PORT: "3000"
+    env_file:
+      - path: .env.production
+        required: false
+    ports:
+      - "3000:3000"
+      # No Ubuntu o CUPS do host ja ocupa a 631. O instalador grava CUPS_PORT no .env.
+      - "127.0.0.1:${CUPS_PORT:-631}:631"
+    volumes:
+      - nfce_data:/data/nfce
+      - cups_data:/etc/cups
+      - api_uploads:/app/ncommerce_api/public/uploads
+      - api_print:/app/ncommerce_api/print_files
+      - api_docs:/app/ncommerce_api/business_docs
+      - api_backups:/var/ncommerce/backups
+      - api_env:/env
+
+  web:
+    image: ${NCOMMERCE_REGISTRY:-ncommerce.app:5050}/ncommerce/web:${NCOMMERCE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "4200:4200"
+    volumes:
+      - web_promos:/usr/share/nginx/html/assets/promo-tablet
+    depends_on:
+      - api
+
+volumes:
+  mysql_data:
+  nfce_data:
+  cups_data:
+  api_uploads:
+  api_print:
+  api_docs:
+  api_backups:
+  api_env:
+  web_promos:
