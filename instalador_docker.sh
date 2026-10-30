@@ -213,7 +213,8 @@ restore_backup_into_docker() {
   fi
   echo "Restaurando o banco no container..."
   sudo docker compose exec -T mysql mysql -uroot -pncommerce_root -e \
-    "CREATE DATABASE IF NOT EXISTS ncommerce_api_production CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+    "CREATE DATABASE IF NOT EXISTS ncommerce_api_production CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" \
+    < /dev/null
   sudo docker compose exec -T mysql mysql -uroot -pncommerce_root ncommerce_api_production < "$work/backup.sql"
   if [ -f "$work/docs.zip" ]; then
     unzip -o "$work/docs.zip" -d "$work" >/dev/null
@@ -243,7 +244,7 @@ restore_backup_into_docker() {
 token_already_on_volume() {
   local i raw value
   for i in $(seq 1 15); do
-    raw="$(sudo docker compose exec -T api sh -c 'if [ -f /env/.env.production ]; then grep -m1 "^NCOMMERCE_SERVER_TOKEN=" /env/.env.production || true; else echo __NOFILE__; fi' 2>/dev/null || echo __EXEC_FAIL__)"
+    raw="$(sudo docker compose exec -T api sh -c 'if [ -f /env/.env.production ]; then grep -m1 "^NCOMMERCE_SERVER_TOKEN=" /env/.env.production || true; else echo __NOFILE__; fi' < /dev/null 2>/dev/null || echo __EXEC_FAIL__)"
     case "$raw" in
       __NOFILE__|"")
         return 1
@@ -524,7 +525,7 @@ EOF
     mkdir -p "$xdg"
   fi
   seen=" "
-  for dir in "$xdg" "${HOME}/Desktop" "${HOME}/Área de Trabalho"; do
+  for dir in "$xdg" "${HOME}/Desktop" "${HOME}/Área de Trabalho" "${HOME}/Área de trabalho"; do
     [ -n "$dir" ] && [ -d "$dir" ] || continue
     case "$seen" in
       *" $dir "*) continue ;;

@@ -209,13 +209,35 @@ function Clone-Repos([string]$GitKey) {
     Remove-Secrets
 }
 
+# docker compose exec, com o console aberto, espera EOF no stdin e nao volta.
+function Invoke-ComposeExec {
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$ArgList)
+    $parts = foreach ($a in $ArgList) {
+        if ($a -match '[\s"]') { '"' + ($a.Replace('"', '\"')) + '"' } else { $a }
+    }
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $DockerExe
+    $psi.Arguments = ((@("compose") + $parts) -join " ")
+    $psi.WorkingDirectory = $InstallDir
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    $proc.StandardInput.Close()
+    $out = $proc.StandardOutput.ReadToEnd()
+    $proc.WaitForExit()
+    $global:LASTEXITCODE = $proc.ExitCode
+    return $out
+}
+
 function Test-TokenOnVolume {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     Push-Location $InstallDir
     try {
         for ($i = 0; $i -lt 15; $i++) {
-            $raw = & $DockerExe compose exec -T api sh -c "if [ -f /env/.env.production ]; then grep -m1 '^NCOMMERCE_SERVER_TOKEN=' /env/.env.production || true; else echo __NOFILE__; fi"
+            $raw = Invoke-ComposeExec exec -T api sh -c "if [ -f /env/.env.production ]; then grep -m1 '^NCOMMERCE_SERVER_TOKEN=' /env/.env.production || true; else echo __NOFILE__; fi"
             if ($LASTEXITCODE -ne 0) {
                 Start-Sleep -Seconds 1
                 continue
@@ -297,7 +319,7 @@ rm -rf /tmp/ncommerce.zip /tmp/ncommerce-restore /tmp/ncommerce-restore.sh
     & $DockerExe compose cp $zip "api:/tmp/ncommerce.zip"
     $copyCode = $LASTEXITCODE
     if ($copyCode -eq 0) {
-        & $DockerExe compose exec -T api unzip -P $pass -o /tmp/ncommerce.zip -d /tmp/ncommerce-restore
+        Invoke-ComposeExec exec -T api unzip -P $pass -o /tmp/ncommerce.zip -d /tmp/ncommerce-restore | Out-Null
         $copyCode = $LASTEXITCODE
     }
     if ($copyCode -eq 0) {
@@ -305,7 +327,7 @@ rm -rf /tmp/ncommerce.zip /tmp/ncommerce-restore /tmp/ncommerce-restore.sh
         $copyCode = $LASTEXITCODE
     }
     if ($copyCode -eq 0) {
-        & $DockerExe compose exec -T api sh /tmp/ncommerce-restore.sh
+        Invoke-ComposeExec exec -T api sh /tmp/ncommerce-restore.sh | Out-Null
         $copyCode = $LASTEXITCODE
     }
     $ErrorActionPreference = "Stop"
