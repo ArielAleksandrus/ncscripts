@@ -412,6 +412,10 @@ EOF
 sudo chmod 644 "$INSTALL_DIR/.env" "$INSTALL_DIR/docker-compose.yml" "$INSTALL_DIR/docker-compose.usb.yml" "$INSTALL_DIR/host-ips.sh"
 
 # A impressora USB passa a ser do CUPS do container. Uma fila USB no CUPS do host disputa o aparelho.
+# O system-config-printer-udev cria essa fila sozinho quando a impressora e plugada. O link para
+# /dev/null anula a regra dele; o CUPS do host continua ligado.
+sudo ln -sfn /dev/null /etc/udev/rules.d/70-printers.rules
+sudo udevadm control --reload || true
 host_usb_queues="$(lpstat -v 2>/dev/null | grep -E 'usb://' || true)"
 if [ -n "$host_usb_queues" ]; then
   echo "O CUPS do Ubuntu tem fila USB. Remova com lpadmin -x <fila> e cadastre a impressora no CUPS do container:"
