@@ -442,7 +442,8 @@ Copy-Item $composeSrc (Join-Path $InstallDir "docker-compose.yml") -Force
 Copy-Item $startupSrc (Join-Path $InstallDir "ncommerce-docker-startup.bat") -Force
 Copy-Item $updateSrc (Join-Path $InstallDir "ncommerce-docker-update.bat") -Force
 Copy-Item (Join-Path $Root "windows\refresh-host-ips.ps1") (Join-Path $InstallDir "refresh-host-ips.ps1") -Force
-Copy-Item (Join-Path $Root "windows\lpd-printers.ps1") (Join-Path $InstallDir "lpd-printers.ps1") -Force
+Copy-Item (Join-Path $Root "windows\usb-printers.ps1") (Join-Path $InstallDir "usb-printers.ps1") -Force
+Copy-Item (Join-Path $Root "windows\drivers") $InstallDir -Recurse -Force
 
 $envFile = Join-Path $InstallDir ".env"
 $registry = $env:NCOMMERCE_REGISTRY
@@ -576,7 +577,7 @@ function New-UpdateShortcut {
 New-UpdateShortcut
 
 # Impressora USB: o container imprime por LPD na impressora compartilhada do Windows.
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir "lpd-printers.ps1")
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir "usb-printers.ps1")
 
 $siteHost = "localhost"
 $ipsLine = Get-Content $envFile | Where-Object { $_ -like "NCOMMERCE_HOST_IPS=*" } | Select-Object -Last 1
@@ -595,4 +596,4 @@ Write-Host "Codigo-fonte em C:\NCommerce\src (ncommerce_api, ncommerce, nfce)."
 Write-Host "A tarefa '$TaskName' sobe a stack quando alguem entra no Windows."
 Write-Host "Depois de uma queda de energia o PC precisa logar sozinho: netplwiz."
 Write-Host "Atualizar: atalho Atualizar NCommerce na Area de Trabalho."
-Write-Host "Impressora USB plugada depois: rode $InstallDir\lpd-printers.ps1 como admin."
+Write-Host "Impressora USB plugada depois: rode $InstallDir\usb-printers.ps1 como admin."
