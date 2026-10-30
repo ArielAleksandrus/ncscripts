@@ -209,6 +209,45 @@ function Clone-Repos([string]$GitKey) {
     Remove-Secrets
 }
 
+function Test-TokenOnVolume {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    Push-Location $InstallDir
+    try {
+        for ($i = 0; $i -lt 15; $i++) {
+            $raw = & $DockerExe compose exec -T api sh -c "if [ -f /env/.env.production ]; then grep -m1 '^NCOMMERCE_SERVER_TOKEN=' /env/.env.production || true; else echo __NOFILE__; fi"
+            if ($LASTEXITCODE -ne 0) {
+                Start-Sleep -Seconds 1
+                continue
+            }
+            $text = "$(@($raw) | Select-Object -Last 1)".Trim()
+            if (-not $text -or $text -eq "__NOFILE__") { return $false }
+            if ($text -notlike "NCOMMERCE_SERVER_TOKEN=*") {
+                Start-Sleep -Seconds 1
+                continue
+            }
+            $value = $text.Substring("NCOMMERCE_SERVER_TOKEN=".Length).Trim().Trim("'").Trim('"')
+            return [bool]$value
+        }
+        return $false
+    } finally {
+        Pop-Location
+        $ErrorActionPreference = $prev
+    }
+}
+
+function Get-DockerSetup([string]$OutFile) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $code = & curl.exe -sS -m 5 -H "Host: localhost" -o $OutFile -w "%{http_code}" "http://127.0.0.1:3000/api/v1/docker_setup"
+    $curlCode = $LASTEXITCODE
+    $ErrorActionPreference = $prev
+    if ($curlCode -ne 0 -or -not $code) { return "000" }
+    $text = "$code".Trim()
+    if ($text -match '(\d{3})\s*$') { return $Matches[1] }
+    return "000"
+}
+
 function Invoke-DockerLogin([string]$Registry, [string]$User, [string]$Token) {
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $DockerExe
@@ -278,6 +317,35 @@ rm -rf /tmp/ncommerce.zip /tmp/ncommerce-restore /tmp/ncommerce-restore.sh
     New-Item -ItemType File -Force -Path $marker | Out-Null
     Write-Host "Backup restaurado nos containers."
 }
+
+function Enable-OpenSshServer {
+    Write-Host "Abrindo o SSH na porta 22..."
+    try {
+        $cap = Get-WindowsCapability -Online -ErrorAction Stop |
+            Where-Object { $_.Name -like "OpenSSH.Server*" } |
+            Select-Object -First 1
+        if (-not $cap) {
+            Write-Host "Este Windows nao oferece o servidor OpenSSH."
+            return
+        }
+        if ($cap.State -ne "Installed") {
+            Add-WindowsCapability -Online -Name $cap.Name -ErrorAction Stop | Out-Null
+        }
+        Set-Service -Name sshd -StartupType Automatic -ErrorAction Stop
+        Start-Service sshd -ErrorAction Stop
+        $rule = Get-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -ErrorAction SilentlyContinue
+        if (-not $rule) {
+            New-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -DisplayName "OpenSSH SSH Server (sshd)" -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 | Out-Null
+        } else {
+            Set-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -Enabled True -Action Allow
+        }
+        Write-Host "SSH do Windows na porta 22. Use o usuario e a senha desta conta."
+    } catch {
+        Write-Host "Nao consegui ligar o SSH: $($_.Exception.Message)"
+    }
+}
+
+Enable-OpenSshServer
 
 if (-not (Get-Command curl.exe -CommandType Application -ErrorAction SilentlyContinue)) {
     Fail "Este Windows nao tem curl.exe."
@@ -375,42 +443,72 @@ Pop-Location
 $ErrorActionPreference = "Stop"
 if ($upCode -ne 0) { Fail "docker compose up falhou." }
 
-Write-Host "Esperando a API para gravar o token..."
-$apiReady = $false
-for ($i = 0; $i -lt 40; $i++) {
-    $ErrorActionPreference = "Continue"
-    & curl.exe -sf -m 3 -o NUL "http://127.0.0.1:3000/api/v1/docker_setup"
-    if ($LASTEXITCODE -eq 0) { $apiReady = $true; break }
-    $ErrorActionPreference = "Stop"
-    Start-Sleep -Seconds 3
+$skipTokenPost = $false
+if (Test-TokenOnVolume) {
+    Write-Host "O token desta maquina ja esta gravado."
+    $skipTokenPost = $true
+} else {
+    Write-Host "Esperando a API para gravar o token..."
+    $apiReady = $false
+    $setupHttp = "000"
+    $probe = New-TemporaryFile
+    for ($i = 1; $i -le 90; $i++) {
+        $setupHttp = Get-DockerSetup $probe.FullName
+        if ($setupHttp -eq "200") { $apiReady = $true; break }
+        if ($i % 5 -eq 0) {
+            Write-Host "A API ainda nao aceitou o setup (HTTP $setupHttp)."
+        }
+        Start-Sleep -Seconds 4
+    }
+    Remove-Item $probe.FullName -Force -ErrorAction SilentlyContinue
+    if (-not $apiReady) {
+        if (Test-TokenOnVolume) {
+            Write-Host "O token desta maquina ja esta gravado."
+            $skipTokenPost = $true
+        } else {
+            $ErrorActionPreference = "Continue"
+            Push-Location $InstallDir
+            & $DockerExe compose ps
+            & $DockerExe compose logs --tail 60 api
+            Pop-Location
+            $ErrorActionPreference = "Stop"
+            Fail "A API nao aceitou o setup (ultimo HTTP $setupHttp) e nao ha token no volume."
+        }
+    }
 }
-if (-not $apiReady) { Fail "A API nao respondeu em http://127.0.0.1:3000. Os containers subiram; o token ainda nao foi gravado." }
 
 Save-CompanyBackup $installCode
 Restore-CompanyBackup $ncommerceToken
 
-$setupFile = New-TemporaryFile
-$ErrorActionPreference = "Continue"
-& curl.exe -sf -m 3 -o $setupFile.FullName "http://127.0.0.1:3000/api/v1/docker_setup"
-$setupCode = $LASTEXITCODE
-$ErrorActionPreference = "Stop"
-$already = $false
-if ($setupCode -eq 0) {
-    $setupRaw = Get-Content -Raw -Path $setupFile.FullName
-    if ($setupRaw -match '"setup_required"\s*:\s*false') { $already = $true }
-}
-Remove-Item $setupFile.FullName -Force
-if ($already) {
-    Write-Host "O token desta maquina ja esta gravado."
-} else {
-    $payloadFile = New-TemporaryFile
-    [System.IO.File]::WriteAllText($payloadFile.FullName, (@{ token = $ncommerceToken } | ConvertTo-Json -Compress))
-    $ErrorActionPreference = "Continue"
-    & curl.exe -sf -m 40 -H "Content-Type: application/json" --data-binary "@$($payloadFile.FullName)" "http://127.0.0.1:3000/api/v1/docker_setup" | Out-Null
-    $postCode = $LASTEXITCODE
-    $ErrorActionPreference = "Stop"
-    Remove-Item $payloadFile.FullName -Force
-    if ($postCode -ne 0) { Fail "A API recusou o token." }
+if (-not $skipTokenPost) {
+    $setupFile = New-TemporaryFile
+    $setupCode = Get-DockerSetup $setupFile.FullName
+    $already = $false
+    if ($setupCode -eq "200") {
+        $setupRaw = Get-Content -Raw -Path $setupFile.FullName
+        if ($setupRaw -match '"setup_required"\s*:\s*false') { $already = $true }
+    }
+    Remove-Item $setupFile.FullName -Force
+    if ($already) {
+        Write-Host "O token desta maquina ja esta gravado."
+    } else {
+        $payloadFile = New-TemporaryFile
+        $answerFile = New-TemporaryFile
+        [System.IO.File]::WriteAllText($payloadFile.FullName, (@{ token = $ncommerceToken } | ConvertTo-Json -Compress))
+        $ErrorActionPreference = "Continue"
+        $postHttp = & curl.exe -sS -m 40 -H "Host: localhost" -H "Content-Type: application/json" --data-binary "@$($payloadFile.FullName)" -o $answerFile.FullName -w "%{http_code}" "http://127.0.0.1:3000/api/v1/docker_setup"
+        $postCode = $LASTEXITCODE
+        $ErrorActionPreference = "Stop"
+        $answer = ""
+        if (Test-Path $answerFile.FullName) { $answer = Get-Content -Raw -Path $answerFile.FullName }
+        Remove-Item $payloadFile.FullName -Force
+        Remove-Item $answerFile.FullName -Force
+        if ($postCode -ne 0 -or "$postHttp".Trim() -ne "200" -or $answer -notmatch '"ok"\s*:\s*true') {
+            Fail "A API recusou o token (HTTP $postHttp). $answer"
+        }
+        if (-not (Test-TokenOnVolume)) { Fail "A API nao gravou /env/.env.production." }
+        Write-Host "Token gravado."
+    }
 }
 $ncommerceToken = $null
 
@@ -446,6 +544,7 @@ Write-Host "NCommerce no ar."
 Write-Host "  Site:  http://${siteHost}:4200"
 Write-Host "  API:   http://localhost:3000"
 Write-Host "  CUPS:  http://127.0.0.1:$cupsPort"
+Write-Host "  SSH:   porta 22, usuario e senha desta conta do Windows"
 Write-Host "Codigo-fonte em C:\NCommerce\src (ncommerce_api, ncommerce, nfce)."
 Write-Host "A tarefa '$TaskName' sobe a stack quando alguem entra no Windows."
 Write-Host "Depois de uma queda de energia o PC precisa logar sozinho: netplwiz."

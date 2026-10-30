@@ -48,6 +48,25 @@ sudo_keep_alive() {
 }
 sudo_keep_alive &
 KEEP_ALIVE_PID=$!
+
+# Ubuntu recem-instalado nao escuta SSH. Abre antes dos passos longos.
+enable_ssh() {
+  echo "Abrindo o SSH na porta 22..."
+  if ! dpkg -s openssh-server >/dev/null 2>&1; then
+    sudo DEBIAN_FRONTEND=noninteractive apt-get update
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server
+  fi
+  if ! sudo systemctl enable --now ssh; then
+    sudo systemctl enable --now ssh.socket
+  fi
+  if command -v ufw >/dev/null 2>&1; then
+    sudo ufw allow 22/tcp >/dev/null || true
+    sudo ufw allow 80/tcp >/dev/null || true
+    sudo ufw allow 443/tcp >/dev/null || true
+  fi
+  echo "SSH na porta 22. Usuario: ${LINUX_USER}."
+}
+enable_ssh
 trap 'kill $KEEP_ALIVE_PID 2>/dev/null || true' EXIT
 
 # ====================== DADOS ======================

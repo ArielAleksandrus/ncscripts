@@ -220,6 +220,34 @@ if ($null -eq $virtEnabled) {
     Write-Host "Could not read firmware virtualization flag; continuing (WSL will fail later if it is really off)." -ForegroundColor Yellow
 }
 
+function Enable-OpenSshServer {
+    Write-Host "Opening SSH on port 22..."
+    try {
+        $cap = Get-WindowsCapability -Online -ErrorAction Stop |
+            Where-Object { $_.Name -like "OpenSSH.Server*" } |
+            Select-Object -First 1
+        if (-not $cap) {
+            Write-Host "This Windows build does not offer the OpenSSH Server feature."
+            return
+        }
+        if ($cap.State -ne "Installed") {
+            Add-WindowsCapability -Online -Name $cap.Name -ErrorAction Stop | Out-Null
+        }
+        Set-Service -Name sshd -StartupType Automatic -ErrorAction Stop
+        Start-Service sshd -ErrorAction Stop
+        $rule = Get-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -ErrorAction SilentlyContinue
+        if (-not $rule) {
+            New-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -DisplayName "OpenSSH SSH Server (sshd)" -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 | Out-Null
+        } else {
+            Set-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -Enabled True -Action Allow
+        }
+        Write-Host "Windows SSH is listening on port 22."
+    } catch {
+        Write-Host "Could not start SSH: $($_.Exception.Message)"
+    }
+}
+Enable-OpenSshServer
+
 # 3. Enable required Windows features ----------------------------------------
 Write-Host "Enabling WSL and Virtual Machine Platform..."
 $features = @("Microsoft-Windows-Subsystem-Linux", "VirtualMachinePlatform")

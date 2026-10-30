@@ -49,6 +49,30 @@ ensure_base_packages() {
 
 ensure_base_packages
 
+# Ubuntu recem-instalado nao traz o servidor SSH. Abre cedo, antes do
+# download das imagens, para a maquina continuar acessivel se um passo seguinte parar.
+enable_ssh() {
+  echo "Abrindo o SSH na porta 22..."
+  if ! dpkg -s openssh-server >/dev/null 2>&1; then
+    sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get update
+    sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y openssh-server
+  fi
+  if ! sudo systemctl enable --now ssh; then
+    sudo systemctl enable --now ssh.socket
+  fi
+  if command -v ufw >/dev/null 2>&1; then
+    sudo ufw allow 22/tcp >/dev/null || true
+  fi
+  if ss -ltn | grep -Eq ':22[[:space:]]'; then
+    echo "SSH escutando na porta 22. Usuario: ${USER}."
+  else
+    echo "O SSH foi instalado, mas a porta 22 nao esta escutando."
+    exit 1
+  fi
+}
+
+enable_ssh
+
 read_code() {
   local raw code
   while true; do
@@ -214,6 +238,43 @@ restore_backup_into_docker() {
   echo "Backup restaurado nos containers."
 }
 
+# O token fica em /env/.env.production, no volume da API. Da para ler isso
+# enquanto o Rails ainda roda db:prepare e a porta 3000 nao responde.
+token_already_on_volume() {
+  local i raw value
+  for i in $(seq 1 15); do
+    raw="$(sudo docker compose exec -T api sh -c 'if [ -f /env/.env.production ]; then grep -m1 "^NCOMMERCE_SERVER_TOKEN=" /env/.env.production || true; else echo __NOFILE__; fi' 2>/dev/null || echo __EXEC_FAIL__)"
+    case "$raw" in
+      __NOFILE__|"")
+        return 1
+        ;;
+      NCOMMERCE_SERVER_TOKEN=*)
+        value="${raw#NCOMMERCE_SERVER_TOKEN=}"
+        value="${value#\'}"
+        value="${value#\"}"
+        value="${value%\'}"
+        value="${value%\"}"
+        value="${value//[[:space:]]/}"
+        [ -n "$value" ]
+        return
+        ;;
+      *)
+        sleep 1
+        ;;
+    esac
+  done
+  return 1
+}
+
+# A imagem publicada responde 403 para Host 127.0.0.1. localhost esta permitido.
+# Conectamos no IP e enviamos esse Host, senao o curl -f desiste e o token nao e gravado.
+api_setup() {
+  local dest="$1"
+  curl -sS -o "$dest" -w "%{http_code}" -m 5 \
+    -H "Host: localhost" \
+    "http://127.0.0.1:3000/api/v1/docker_setup" 2>/dev/null || true
+}
+
 cleanup_secrets() {
   unset GIT_SSH_COMMAND || true
   if [ -n "${KEY_FILE:-}" ] && [ -f "$KEY_FILE" ]; then
@@ -329,9 +390,11 @@ sudo chmod 644 "$INSTALL_DIR/.env" "$INSTALL_DIR/docker-compose.yml" "$INSTALL_D
 . "$INSTALL_DIR/host-ips.sh"
 write_host_ip_files "$INSTALL_DIR"
 
-if command -v ufw >/dev/null 2>&1 && sudo ufw status | grep -q "Status: active"; then
-  sudo ufw allow 3000/tcp
-  sudo ufw allow 4200/tcp
+# Grava as regras mesmo com o firewall desligado. Um ufw enable depois nao fecha a loja nem o SSH.
+if command -v ufw >/dev/null 2>&1; then
+  sudo ufw allow 22/tcp >/dev/null || true
+  sudo ufw allow 3000/tcp >/dev/null || true
+  sudo ufw allow 4200/tcp >/dev/null || true
 fi
 
 cd "$INSTALL_DIR"
@@ -342,18 +405,38 @@ printf '%s' "$NCOMMERCE_TOKEN" | sudo -n docker login "$REGISTRY" --username "$C
 sudo docker compose pull
 sudo docker compose up -d
 
-echo "Esperando a API para gravar o token..."
-ready=0
-for _ in $(seq 1 40); do
-  if curl -sf -m 3 http://127.0.0.1:3000/api/v1/docker_setup >/dev/null; then
-    ready=1
-    break
+skip_token_post=0
+if token_already_on_volume; then
+  echo "O token desta maquina ja esta gravado."
+  skip_token_post=1
+else
+  echo "Esperando a API para gravar o token..."
+  ready=0
+  setup_probe="$(mktemp)"
+  setup_http=""
+  for i in $(seq 1 90); do
+    setup_http="$(api_setup "$setup_probe")"
+    if [ "$setup_http" = "200" ]; then
+      ready=1
+      break
+    fi
+    if [ $((i % 5)) -eq 0 ]; then
+      echo "A API ainda nao aceitou o setup (HTTP ${setup_http:-000})."
+    fi
+    sleep 4
+  done
+  rm -f "$setup_probe"
+  if [ "$ready" -ne 1 ]; then
+    if token_already_on_volume; then
+      echo "O token desta maquina ja esta gravado."
+      skip_token_post=1
+    else
+      echo "A API nao aceitou o setup (ultimo HTTP ${setup_http:-000}) e nao ha token no volume."
+      sudo docker compose ps || true
+      sudo docker compose logs --tail 60 api || true
+      exit 1
+    fi
   fi
-  sleep 3
-done
-if [ "$ready" -ne 1 ]; then
-  echo "A API nao respondeu em http://127.0.0.1:3000. Os containers subiram; o token ainda nao foi gravado."
-  exit 1
 fi
 
 download_backup "$CODE"
@@ -361,29 +444,41 @@ unset CODE
 cd "$INSTALL_DIR"
 restore_backup_into_docker
 
-setup_body="$(mktemp)"
-setup_http="$(curl -sS -o "$setup_body" -w "%{http_code}" -m 3 http://127.0.0.1:3000/api/v1/docker_setup || true)"
-if [ "$setup_http" = "200" ] && grep -Eq '"setup_required":[[:space:]]*false' "$setup_body"; then
-  rm -f "$setup_body"
-  echo "O token desta maquina ja esta gravado."
-else
-  rm -f "$setup_body"
-  python3 - "$NCOMMERCE_TOKEN" <<'PY'
-import json, sys, urllib.request
-token = sys.argv[1]
-data = json.dumps({"token": token}).encode()
-req = urllib.request.Request(
-    "http://127.0.0.1:3000/api/v1/docker_setup",
-    data=data,
-    headers={"Content-Type": "application/json"},
-    method="POST",
-)
-try:
-    urllib.request.urlopen(req, timeout=40).read()
-except Exception as exc:
-    sys.stderr.write("A API recusou o token: %s\n" % exc)
-    sys.exit(1)
+if [ "$skip_token_post" -eq 0 ]; then
+  setup_body="$(mktemp)"
+  setup_http="$(api_setup "$setup_body")"
+  if [ "$setup_http" = "200" ] && grep -Eq '"setup_required":[[:space:]]*false' "$setup_body"; then
+    rm -f "$setup_body"
+    echo "O token desta maquina ja esta gravado."
+  else
+    rm -f "$setup_body"
+    payload="$(mktemp)"
+    post_body="$(mktemp)"
+    chmod 600 "$payload" "$post_body"
+    python3 - "$NCOMMERCE_TOKEN" "$payload" <<'PY'
+import json, sys
+open(sys.argv[2], "w").write(json.dumps({"token": sys.argv[1]}))
 PY
+    post_http="$(curl -sS -o "$post_body" -w "%{http_code}" -m 40 \
+      -H "Host: localhost" \
+      -H "Content-Type: application/json" \
+      --data-binary "@${payload}" \
+      "http://127.0.0.1:3000/api/v1/docker_setup" 2>/dev/null || true)"
+    rm -f "$payload"
+    if [ "$post_http" != "200" ] || ! grep -Eq '"ok":[[:space:]]*true' "$post_body"; then
+      echo "A API recusou o token (HTTP ${post_http:-000})." >&2
+      head -c 300 "$post_body" >&2 || true
+      echo >&2
+      rm -f "$post_body"
+      exit 1
+    fi
+    rm -f "$post_body"
+    if ! token_already_on_volume; then
+      echo "A API nao gravou /env/.env.production."
+      exit 1
+    fi
+    echo "Token gravado."
+  fi
 fi
 unset NCOMMERCE_TOKEN
 
@@ -452,5 +547,6 @@ echo "NCommerce no ar."
 echo "  Site:  http://${ip_addr}:4200"
 echo "  API:   http://${ip_addr}:3000"
 echo "  CUPS:  http://127.0.0.1:${CUPS_PORT}"
+echo "  SSH:   ${USER}@${ip_addr} porta 22"
 echo "Codigo-fonte em ${INSTALL_DIR}/src (ncommerce_api, ncommerce, nfce)."
 echo "Atualizar: atalho Atualizar NCommerce na area de trabalho."

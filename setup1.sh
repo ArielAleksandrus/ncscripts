@@ -22,6 +22,16 @@ $APT install -y \
   samba smbclient libsmbclient python3-smbc htop \
   zenity zip unzip cups
 
+if ! sudo systemctl enable --now ssh; then
+  sudo systemctl enable --now ssh.socket
+fi
+if command -v ufw >/dev/null 2>&1; then
+  sudo ufw allow 22/tcp >/dev/null || true
+  sudo ufw allow 80/tcp >/dev/null || true
+  sudo ufw allow 443/tcp >/dev/null || true
+fi
+echo "SSH na porta 22."
+
 # ---------------------------------------------------------------
 # Google Chrome (.deb, sem snap)
 # ---------------------------------------------------------------
