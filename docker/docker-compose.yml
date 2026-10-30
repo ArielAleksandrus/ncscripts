@@ -54,8 +54,13 @@ services:
       BACKUP_DIR: /var/ncommerce/backups
       PORT: "3000"
       CUPS_HOST_PORT: ${CUPS_PORT:-631}
+      # Tunel Nlabs: o front esta no container web e a porta 22 e a do host.
+      TUNNEL_FRONT_HOST: web
+      TUNNEL_SSH_HOST: host.docker.internal
       # IP da loja. `ip a` dentro do container nao mostra a rede do servidor.
       NCOMMERCE_HOST_IPS: ${NCOMMERCE_HOST_IPS:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - path: .env.production
         required: false
