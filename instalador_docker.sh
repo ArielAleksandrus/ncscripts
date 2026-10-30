@@ -399,6 +399,7 @@ TAG="${REQUESTED_TAG:-${file_tag:-latest}}"
 
 sudo mkdir -p "$INSTALL_DIR"
 sudo cp "$ROOT/docker/docker-compose.yml" "$INSTALL_DIR/docker-compose.yml"
+sudo cp "$ROOT/docker/docker-compose.usb.yml" "$INSTALL_DIR/docker-compose.usb.yml"
 sudo cp "$ROOT/docker/update.sh" "$INSTALL_DIR/update.sh"
 sudo cp "$ROOT/docker/host-ips.sh" "$INSTALL_DIR/host-ips.sh"
 sudo chmod 755 "$INSTALL_DIR/update.sh"
@@ -406,8 +407,17 @@ sudo tee "$INSTALL_DIR/.env" >/dev/null <<EOF
 CUPS_PORT=${CUPS_PORT}
 NCOMMERCE_REGISTRY=${REGISTRY}
 NCOMMERCE_TAG=${TAG}
+COMPOSE_FILE=docker-compose.yml:docker-compose.usb.yml
 EOF
-sudo chmod 644 "$INSTALL_DIR/.env" "$INSTALL_DIR/docker-compose.yml" "$INSTALL_DIR/host-ips.sh"
+sudo chmod 644 "$INSTALL_DIR/.env" "$INSTALL_DIR/docker-compose.yml" "$INSTALL_DIR/docker-compose.usb.yml" "$INSTALL_DIR/host-ips.sh"
+
+# A impressora USB passa a ser do CUPS do container. Uma fila USB no CUPS do host disputa o aparelho.
+host_usb_queues="$(lpstat -v 2>/dev/null | grep -E 'usb://' || true)"
+if [ -n "$host_usb_queues" ]; then
+  echo "O CUPS do Ubuntu tem fila USB. Remova com lpadmin -x <fila> e cadastre a impressora no CUPS do container:"
+  echo "$host_usb_queues"
+fi
+
 # shellcheck disable=SC1091
 . "$INSTALL_DIR/host-ips.sh"
 write_host_ip_files "$INSTALL_DIR"

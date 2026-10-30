@@ -1,0 +1,11 @@
+# Impressora USB no Linux. O instalador_docker.sh liga este arquivo pelo COMPOSE_FILE do .env.
+# No Windows o Docker Desktop nao ve USB: la a impressora vai por LPD.
+# O CUPS do host nao pode ter fila para a mesma impressora, senao os dois disputam o aparelho.
+
+services:
+  api:
+    # 189 e o major dos aparelhos USB. A regra vale para quem for plugado depois.
+    device_cgroup_rules:
+      - "c 189:* rmw"
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
