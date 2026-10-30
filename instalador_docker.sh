@@ -317,13 +317,17 @@ TAG="${REQUESTED_TAG:-${file_tag:-latest}}"
 sudo mkdir -p "$INSTALL_DIR"
 sudo cp "$ROOT/docker/docker-compose.yml" "$INSTALL_DIR/docker-compose.yml"
 sudo cp "$ROOT/docker/update.sh" "$INSTALL_DIR/update.sh"
+sudo cp "$ROOT/docker/host-ips.sh" "$INSTALL_DIR/host-ips.sh"
 sudo chmod 755 "$INSTALL_DIR/update.sh"
 sudo tee "$INSTALL_DIR/.env" >/dev/null <<EOF
 CUPS_PORT=${CUPS_PORT}
 NCOMMERCE_REGISTRY=${REGISTRY}
 NCOMMERCE_TAG=${TAG}
 EOF
-sudo chmod 644 "$INSTALL_DIR/.env" "$INSTALL_DIR/docker-compose.yml"
+sudo chmod 644 "$INSTALL_DIR/.env" "$INSTALL_DIR/docker-compose.yml" "$INSTALL_DIR/host-ips.sh"
+# shellcheck disable=SC1091
+. "$INSTALL_DIR/host-ips.sh"
+write_host_ip_files "$INSTALL_DIR"
 
 if command -v ufw >/dev/null 2>&1 && sudo ufw status | grep -q "Status: active"; then
   sudo ufw allow 3000/tcp
@@ -357,7 +361,14 @@ unset CODE
 cd "$INSTALL_DIR"
 restore_backup_into_docker
 
-python3 - "$NCOMMERCE_TOKEN" <<'PY'
+setup_body="$(mktemp)"
+setup_http="$(curl -sS -o "$setup_body" -w "%{http_code}" -m 3 http://127.0.0.1:3000/api/v1/docker_setup || true)"
+if [ "$setup_http" = "200" ] && grep -Eq '"setup_required":[[:space:]]*false' "$setup_body"; then
+  rm -f "$setup_body"
+  echo "O token desta maquina ja esta gravado."
+else
+  rm -f "$setup_body"
+  python3 - "$NCOMMERCE_TOKEN" <<'PY'
 import json, sys, urllib.request
 token = sys.argv[1]
 data = json.dumps({"token": token}).encode()
@@ -373,9 +384,68 @@ except Exception as exc:
     sys.stderr.write("A API recusou o token: %s\n" % exc)
     sys.exit(1)
 PY
+fi
 unset NCOMMERCE_TOKEN
 
-ip_addr="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+write_update_shortcut() {
+  local wrapper tmp dir xdg
+  wrapper="$INSTALL_DIR/atualizar-terminal.sh"
+  sudo tee "$wrapper" >/dev/null <<EOF
+#!/bin/bash
+cd "$INSTALL_DIR"
+./update.sh
+status=\$?
+echo
+if [ "\$status" -eq 0 ]; then
+  echo "Atualizacao concluida."
+else
+  echo "Atualizacao falhou (codigo \$status)."
+fi
+read -r -p "Pressione Enter para fechar. "
+EOF
+  sudo chmod 755 "$wrapper"
+
+  tmp="$(mktemp)"
+  cat > "$tmp" <<EOF
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Atualizar NCommerce
+Comment=Baixa a versao publicada e recria os containers
+Exec=$wrapper
+Icon=system-software-update
+Terminal=true
+Categories=Utility;
+EOF
+  chmod +x "$tmp"
+
+  # Desktop no Ubuntu em ingles, Area de Trabalho no Ubuntu em portugues.
+  # xdg-user-dir aponta para a pasta que o sistema esta usando.
+  xdg=""
+  if command -v xdg-user-dir >/dev/null 2>&1; then
+    xdg="$(xdg-user-dir DESKTOP 2>/dev/null || true)"
+  fi
+  if [ -n "$xdg" ]; then
+    mkdir -p "$xdg"
+  fi
+  seen=" "
+  for dir in "$xdg" "${HOME}/Desktop" "${HOME}/Área de Trabalho"; do
+    [ -n "$dir" ] && [ -d "$dir" ] || continue
+    case "$seen" in
+      *" $dir "*) continue ;;
+    esac
+    seen="$seen$dir "
+    cp "$tmp" "$dir/Atualizar NCommerce.desktop"
+    chmod +x "$dir/Atualizar NCommerce.desktop"
+    gio set "$dir/Atualizar NCommerce.desktop" metadata::trusted true 2>/dev/null || true
+    echo "Atalho: $dir/Atualizar NCommerce.desktop"
+  done
+  rm -f "$tmp"
+}
+
+write_update_shortcut
+
+ip_addr="$(host_lan_ips | cut -d, -f1)"
 ip_addr="${ip_addr:-127.0.0.1}"
 echo
 echo "NCommerce no ar."
@@ -383,4 +453,4 @@ echo "  Site:  http://${ip_addr}:4200"
 echo "  API:   http://${ip_addr}:3000"
 echo "  CUPS:  http://127.0.0.1:${CUPS_PORT}"
 echo "Codigo-fonte em ${INSTALL_DIR}/src (ncommerce_api, ncommerce, nfce)."
-echo "Atualizar as imagens: ${INSTALL_DIR}/update.sh"
+echo "Atualizar: atalho Atualizar NCommerce na area de trabalho."

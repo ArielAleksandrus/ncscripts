@@ -16,6 +16,11 @@ if [ ! -f "$INSTALL_DIR/docker-compose.yml" ]; then
 fi
 
 cd "$INSTALL_DIR"
+if [ -f "$INSTALL_DIR/host-ips.sh" ]; then
+  # shellcheck disable=SC1091
+  . "$INSTALL_DIR/host-ips.sh"
+  write_host_ip_files "$INSTALL_DIR"
+fi
 sudo docker compose pull
 sudo docker compose up -d
 sudo docker compose ps

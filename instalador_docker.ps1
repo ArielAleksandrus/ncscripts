@@ -60,9 +60,15 @@ function Get-InstallGrant([string]$Code) {
     $curlCode = $LASTEXITCODE
     $ErrorActionPreference = "Stop"
     Remove-Item $payloadFile.FullName -Force -ErrorAction SilentlyContinue
+    $http = "$http".Trim()
     if ($curlCode -ne 0 -or $http -ne "200") {
+        $detail = ""
+        if (Test-Path $bodyFile.FullName) {
+            $detail = Get-Content -Raw -Path $bodyFile.FullName -ErrorAction SilentlyContinue
+            if ($detail -and $detail.Length -gt 500) { $detail = $detail.Substring(0, 500) }
+        }
         Remove-Item $bodyFile.FullName -Force -ErrorAction SilentlyContinue
-        Fail "Codigo recusado (HTTP $http). Invalido, expirado, ja usado em outro PC, ou o mestre ainda nao tem a access key."
+        Fail "Codigo recusado (HTTP $http). $detail"
     }
     try {
         $grant = Get-Content -Raw -Path $bodyFile.FullName | ConvertFrom-Json
@@ -97,7 +103,6 @@ function Save-CompanyBackup([string]$Code) {
         Fail "Nao consegui baixar o backup (HTTP $http)."
     }
     Write-Host "Backup baixado em $dest."
-    Write-Host "A senha do zip sao os 6 primeiros caracteres do token, que o instalador ja enviou para a API."
 }
 
 $script:SecretFiles = @()
@@ -180,7 +185,9 @@ function Clone-Repos([string]$GitKey) {
     if (-not $scan) { Fail "Nao consegui obter a chave do servidor bitbucket.org." }
     [System.IO.File]::WriteAllText($knownFile.FullName, (($scan | Out-String).Trim() + "`n"), $utf8)
 
-    $env:GIT_SSH_COMMAND = "`"$ssh`" -i `"$($keyFile.FullName)`" -o IdentitiesOnly=yes -o UserKnownHostsFile=`"$($knownFile.FullName)`" -o StrictHostKeyChecking=yes"
+    $keyForSsh = ($keyFile.FullName -replace '\\', '/')
+    $knownForSsh = ($knownFile.FullName -replace '\\', '/')
+    $env:GIT_SSH_COMMAND = "`"$ssh`" -i `"$keyForSsh`" -o IdentitiesOnly=yes -o UserKnownHostsFile=`"$knownForSsh`" -o StrictHostKeyChecking=yes"
     $env:GIT_TERMINAL_PROMPT = "0"
     foreach ($repo in @("ncommerce_api", "ncommerce", "nfce")) {
         $dest = Join-Path $src $repo
@@ -200,6 +207,80 @@ function Clone-Repos([string]$GitKey) {
         }
     }
     Remove-Secrets
+}
+
+function Invoke-DockerLogin([string]$Registry, [string]$User, [string]$Token) {
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $DockerExe
+    $psi.Arguments = "login `"$Registry`" --username `"$User`" --password-stdin"
+    $psi.RedirectStandardInput = $true
+    $psi.UseShellExecute = $false
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    $proc.StandardInput.Write($Token)
+    $proc.StandardInput.Close()
+    $proc.WaitForExit()
+    if ($proc.ExitCode -ne 0) { Fail "docker login falhou." }
+}
+
+function Restore-CompanyBackup([string]$Token) {
+    $zip = Join-Path $InstallDir "ncommerce.zip"
+    $marker = Join-Path $InstallDir ".backup-restored"
+    if ((Test-Path $marker) -or -not (Test-Path $zip)) { return }
+    if ($Token.Length -lt 6) { Fail "Token curto demais para abrir o backup." }
+    $pass = $Token.Substring(0, 6)
+    Write-Host "Restaurando o banco no container..."
+
+    $restore = @'
+set -e
+cd /tmp/ncommerce-restore
+if [ ! -f backup.sql ]; then
+  echo "sem backup.sql"
+  exit 1
+fi
+if [ -f docs.zip ]; then unzip -o docs.zip -d /tmp/ncommerce-restore >/dev/null; fi
+if [ -f nfce.zip ]; then unzip -o nfce.zip -d /tmp/ncommerce-restore >/dev/null; fi
+mysql -h mysql -uroot -pncommerce_root -e "CREATE DATABASE IF NOT EXISTS ncommerce_api_production CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+mysql -h mysql -uroot -pncommerce_root ncommerce_api_production < backup.sql
+if [ -d business_docs ]; then cp -a business_docs /app/ncommerce_api/; fi
+if [ -d essentials ]; then cp -a essentials /data/nfce/; fi
+if [ -d notas_output ]; then cp -a notas_output /data/nfce/; fi
+if [ -f printers.conf ]; then cp -a printers.conf /etc/cups/printers.conf; fi
+rm -rf /tmp/ncommerce.zip /tmp/ncommerce-restore /tmp/ncommerce-restore.sh
+'@
+    $restore = $restore -replace "`r`n", "`n" -replace "`r", "`n"
+    if (-not $restore.EndsWith("`n")) { $restore += "`n" }
+    $scriptFile = New-TemporaryFile
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($scriptFile.FullName, $restore, $utf8)
+
+    Push-Location $InstallDir
+    $ErrorActionPreference = "Continue"
+    & $DockerExe compose cp $zip "api:/tmp/ncommerce.zip"
+    $copyCode = $LASTEXITCODE
+    if ($copyCode -eq 0) {
+        & $DockerExe compose exec -T api unzip -P $pass -o /tmp/ncommerce.zip -d /tmp/ncommerce-restore
+        $copyCode = $LASTEXITCODE
+    }
+    if ($copyCode -eq 0) {
+        & $DockerExe compose cp $scriptFile.FullName "api:/tmp/ncommerce-restore.sh"
+        $copyCode = $LASTEXITCODE
+    }
+    if ($copyCode -eq 0) {
+        & $DockerExe compose exec -T api sh /tmp/ncommerce-restore.sh
+        $copyCode = $LASTEXITCODE
+    }
+    $ErrorActionPreference = "Stop"
+    Pop-Location
+    Remove-Item $scriptFile.FullName -Force -ErrorAction SilentlyContinue
+    if ($copyCode -ne 0) {
+        Fail "Nao abri o backup. A senha sao os 6 primeiros caracteres do token, e o zip ficou em $zip."
+    }
+    New-Item -ItemType File -Force -Path $marker | Out-Null
+    Write-Host "Backup restaurado nos containers."
+}
+
+if (-not (Get-Command curl.exe -CommandType Application -ErrorAction SilentlyContinue)) {
+    Fail "Este Windows nao tem curl.exe."
 }
 
 $installCode = Read-InstallCode
@@ -250,6 +331,7 @@ New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 Copy-Item $composeSrc (Join-Path $InstallDir "docker-compose.yml") -Force
 Copy-Item $startupSrc (Join-Path $InstallDir "ncommerce-docker-startup.bat") -Force
 Copy-Item $updateSrc (Join-Path $InstallDir "ncommerce-docker-update.bat") -Force
+Copy-Item (Join-Path $Root "windows\refresh-host-ips.ps1") (Join-Path $InstallDir "refresh-host-ips.ps1") -Force
 
 $envFile = Join-Path $InstallDir ".env"
 $registry = $env:NCOMMERCE_REGISTRY
@@ -259,6 +341,8 @@ $tag = $env:NCOMMERCE_TAG
 if (-not $tag) { $tag = Read-EnvValue $envFile "NCOMMERCE_TAG" "latest" }
 $envBody = "CUPS_PORT=$cupsPort`nNCOMMERCE_REGISTRY=$registry`nNCOMMERCE_TAG=$tag`n"
 [System.IO.File]::WriteAllText($envFile, $envBody)
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir "refresh-host-ips.ps1") $InstallDir
+if ($LASTEXITCODE -ne 0) { Fail "Nao consegui gravar os IPs desta maquina." }
 
 foreach ($port in @(3000, 4200)) {
     $name = "NCommerce TCP $port"
@@ -275,8 +359,7 @@ if ($LASTEXITCODE -ne 0) { Fail "Nao consegui criar a tarefa $TaskName." }
 
 if (-not $grant.company) { Fail "O resgate nao trouxe o nome da empresa para entrar no registry." }
 Write-Host "Entrando no registry $registry como $($grant.company)..."
-$ncommerceToken | & $DockerExe login $registry --username ([string]$grant.company) --password-stdin
-if ($LASTEXITCODE -ne 0) { Fail "docker login falhou." }
+Invoke-DockerLogin $registry ([string]$grant.company) $ncommerceToken
 
 Write-Host "Baixando as imagens e subindo a stack..."
 $ErrorActionPreference = "Continue"
@@ -303,24 +386,67 @@ for ($i = 0; $i -lt 40; $i++) {
 }
 if (-not $apiReady) { Fail "A API nao respondeu em http://127.0.0.1:3000. Os containers subiram; o token ainda nao foi gravado." }
 
-$payloadFile = New-TemporaryFile
-[System.IO.File]::WriteAllText($payloadFile.FullName, (@{ token = $ncommerceToken } | ConvertTo-Json -Compress))
-$ErrorActionPreference = "Continue"
-& curl.exe -sf -m 40 -H "Content-Type: application/json" --data-binary "@$($payloadFile.FullName)" "http://127.0.0.1:3000/api/v1/docker_setup" | Out-Null
-$postCode = $LASTEXITCODE
-$ErrorActionPreference = "Stop"
-Remove-Item $payloadFile.FullName -Force
-$ncommerceToken = $null
-if ($postCode -ne 0) { Fail "A API recusou o token." }
-
 Save-CompanyBackup $installCode
+Restore-CompanyBackup $ncommerceToken
+
+$setupFile = New-TemporaryFile
+$ErrorActionPreference = "Continue"
+& curl.exe -sf -m 3 -o $setupFile.FullName "http://127.0.0.1:3000/api/v1/docker_setup"
+$setupCode = $LASTEXITCODE
+$ErrorActionPreference = "Stop"
+$already = $false
+if ($setupCode -eq 0) {
+    $setupRaw = Get-Content -Raw -Path $setupFile.FullName
+    if ($setupRaw -match '"setup_required"\s*:\s*false') { $already = $true }
+}
+Remove-Item $setupFile.FullName -Force
+if ($already) {
+    Write-Host "O token desta maquina ja esta gravado."
+} else {
+    $payloadFile = New-TemporaryFile
+    [System.IO.File]::WriteAllText($payloadFile.FullName, (@{ token = $ncommerceToken } | ConvertTo-Json -Compress))
+    $ErrorActionPreference = "Continue"
+    & curl.exe -sf -m 40 -H "Content-Type: application/json" --data-binary "@$($payloadFile.FullName)" "http://127.0.0.1:3000/api/v1/docker_setup" | Out-Null
+    $postCode = $LASTEXITCODE
+    $ErrorActionPreference = "Stop"
+    Remove-Item $payloadFile.FullName -Force
+    if ($postCode -ne 0) { Fail "A API recusou o token." }
+}
+$ncommerceToken = $null
+
+function New-UpdateShortcut {
+    $desktop = [Environment]::GetFolderPath("Desktop")
+    if (-not $desktop) {
+        Write-Host "Nao achei a Area de Trabalho para o atalho."
+        return
+    }
+    $lnk = Join-Path $desktop "Atualizar NCommerce.lnk"
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($lnk)
+    $shortcut.TargetPath = "cmd.exe"
+    $shortcut.Arguments = '/c "' + (Join-Path $InstallDir "ncommerce-docker-update.bat") + ' & pause"'
+    $shortcut.WorkingDirectory = $InstallDir
+    $shortcut.WindowStyle = 1
+    $shortcut.Description = "Baixa a versao publicada e recria os containers"
+    $shortcut.Save()
+    Write-Host "Atalho: $lnk"
+}
+
+New-UpdateShortcut
+
+$siteHost = "localhost"
+$ipsLine = Get-Content $envFile | Where-Object { $_ -like "NCOMMERCE_HOST_IPS=*" } | Select-Object -Last 1
+if ($ipsLine) {
+    $firstIp = ($ipsLine.Substring("NCOMMERCE_HOST_IPS=".Length) -split ",")[0]
+    if ($firstIp) { $siteHost = $firstIp }
+}
 
 Write-Host ""
 Write-Host "NCommerce no ar."
-Write-Host "  Site:  http://localhost:4200"
+Write-Host "  Site:  http://${siteHost}:4200"
 Write-Host "  API:   http://localhost:3000"
 Write-Host "  CUPS:  http://127.0.0.1:$cupsPort"
 Write-Host "Codigo-fonte em C:\NCommerce\src (ncommerce_api, ncommerce, nfce)."
 Write-Host "A tarefa '$TaskName' sobe a stack quando alguem entra no Windows."
 Write-Host "Depois de uma queda de energia o PC precisa logar sozinho: netplwiz."
-Write-Host "Atualizar as imagens: C:\NCommerce\ncommerce-docker-update.bat"
+Write-Host "Atualizar: atalho Atualizar NCommerce na Area de Trabalho."

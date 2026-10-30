@@ -53,6 +53,9 @@ services:
       COMPUTER_USER: root
       BACKUP_DIR: /var/ncommerce/backups
       PORT: "3000"
+      CUPS_HOST_PORT: ${CUPS_PORT:-631}
+      # IP da loja. `ip a` dentro do container nao mostra a rede do servidor.
+      NCOMMERCE_HOST_IPS: ${NCOMMERCE_HOST_IPS:-}
     env_file:
       - path: .env.production
         required: false
@@ -68,6 +71,8 @@ services:
       - api_docs:/app/ncommerce_api/business_docs
       - api_backups:/var/ncommerce/backups
       - api_env:/env
+      # A imagem publicada ainda chama `ip a`. Este arquivo responde com o IP do host.
+      - ./bin/ip:/usr/local/bin/ip:ro
 
   web:
     image: ${NCOMMERCE_REGISTRY:-ncommerce.app:5050}/ncommerce/web:${NCOMMERCE_TAG:-latest}
