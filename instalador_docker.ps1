@@ -369,6 +369,26 @@ function Enable-OpenSshServer {
 
 Enable-OpenSshServer
 
+# AnyDesk para o suporte entrar na tela do cliente. Falha aqui nao para a instalacao.
+function Install-AnyDesk {
+    $paths = @("${env:ProgramFiles(x86)}\AnyDesk\AnyDesk.exe", "$env:ProgramFiles\AnyDesk\AnyDesk.exe")
+    if ($paths | Where-Object { Test-Path $_ }) {
+        Write-Host "AnyDesk ja instalado."
+        return
+    }
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Host "Sem winget. Instale o AnyDesk depois em https://anydesk.com."
+        return
+    }
+    Write-Host "Instalando o AnyDesk..."
+    & winget install --exact --id AnyDeskSoftwareGmbH.AnyDesk --accept-package-agreements --accept-source-agreements --disable-interactivity
+    if (-not ($paths | Where-Object { Test-Path $_ })) {
+        Write-Host "Nao consegui instalar o AnyDesk. Instale depois em https://anydesk.com."
+    }
+}
+
+Install-AnyDesk
+
 if (-not (Get-Command curl.exe -CommandType Application -ErrorAction SilentlyContinue)) {
     Fail "Este Windows nao tem curl.exe."
 }

@@ -73,6 +73,27 @@ enable_ssh() {
 
 enable_ssh
 
+# AnyDesk para o suporte entrar na tela do cliente. Falha aqui nao para a instalacao.
+install_anydesk() {
+  if command -v anydesk >/dev/null 2>&1; then
+    echo "AnyDesk ja instalado."
+    return 0
+  fi
+  if grep -qi microsoft /proc/version 2>/dev/null; then
+    echo "WSL: o AnyDesk vai no Windows. Pulando."
+    return 0
+  fi
+  echo "Instalando o AnyDesk..."
+  curl -fsSL https://keys.anydesk.com/repos/DEB-GPG-KEY \
+    | sudo gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/anydesk.gpg || return 1
+  echo "deb http://deb.anydesk.com/ all main" | sudo tee /etc/apt/sources.list.d/anydesk-stable.list >/dev/null
+  sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get update || return 1
+  sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y anydesk || return 1
+  echo "AnyDesk ID: $(anydesk --get-id 2>/dev/null || echo 'abra o AnyDesk para ver')"
+}
+
+install_anydesk || echo "Nao consegui instalar o AnyDesk. Instale depois em https://anydesk.com."
+
 read_code() {
   local raw code
   while true; do
