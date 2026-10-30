@@ -78,6 +78,8 @@ services:
       - api_env:/env
       # A imagem publicada ainda chama `ip a`. Este arquivo responde com o IP do host.
       - ./bin/ip:/usr/local/bin/ip:ro
+      # O host grava aqui o ID do AnyDesk ao ligar (anydesk-id.sh / anydesk-id.ps1).
+      - ./host:/host:ro
 
   web:
     image: ${NCOMMERCE_REGISTRY:-ncommerce.app:5050}/ncommerce/web:${NCOMMERCE_TAG:-latest}

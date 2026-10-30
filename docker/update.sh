@@ -21,6 +21,9 @@ if [ -f "$INSTALL_DIR/host-ips.sh" ]; then
   . "$INSTALL_DIR/host-ips.sh"
   write_host_ip_files "$INSTALL_DIR"
 fi
+if [ -x "$INSTALL_DIR/anydesk-id.sh" ]; then
+  sudo "$INSTALL_DIR/anydesk-id.sh" "$INSTALL_DIR" || true
+fi
 sudo docker compose pull
 sudo docker compose up -d
 sudo docker compose ps

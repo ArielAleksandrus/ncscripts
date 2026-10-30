@@ -94,6 +94,28 @@ install_anydesk() {
 
 install_anydesk || echo "Nao consegui instalar o AnyDesk. Instale depois em https://anydesk.com."
 
+# O suporte pede para o cliente abrir o AnyDesk. Fixado na barra lateral, e so clicar no icone vermelho.
+pin_anydesk_to_dock() {
+  local apps bus
+  command -v gsettings >/dev/null 2>&1 || return 0
+  [ -f /usr/share/applications/anydesk.desktop ] || return 0
+  bus="/run/user/$(id -u)/bus"
+  if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -S "$bus" ]; then
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=$bus"
+  fi
+  apps="$(gsettings get org.gnome.shell favorite-apps 2>/dev/null)" || return 0
+  case "$apps" in
+    *"'anydesk.desktop'"*) return 0 ;;
+    "@as []"|"[]") apps="['anydesk.desktop']" ;;
+    *) apps="${apps%]}, 'anydesk.desktop']" ;;
+  esac
+  if gsettings set org.gnome.shell favorite-apps "$apps" 2>/dev/null; then
+    echo "AnyDesk fixado na barra lateral."
+  fi
+}
+
+pin_anydesk_to_dock
+
 read_code() {
   local raw code
   while true; do
@@ -154,6 +176,7 @@ token = d.get("token") or d.get("ncommerce_token") or ""
 key = d.get("git_private_key") or ""
 company = d.get("company") or ""
 registry = d.get("registry") or ""
+anydesk_password = d.get("anydesk_password") or ""
 if not isinstance(token, str):
     token = ""
 if not isinstance(key, str):
@@ -162,17 +185,20 @@ if not isinstance(company, str):
     company = ""
 if not isinstance(registry, str):
     registry = ""
+if not isinstance(anydesk_password, str) or "\n" in anydesk_password:
+    anydesk_password = ""
 key = key.replace("\r\n", "\n").replace("\r", "\n")
 if key and not key.endswith("\n"):
     key += "\n"
 open(key_path, "w").write(key)
-sys.stdout.write("%s\n%s\n%s" % (token, company, registry))
+sys.stdout.write("%s\n%s\n%s\n%s" % (token, company, registry, anydesk_password))
 PY
 )"
   rm -f "$body"
   NCOMMERCE_TOKEN="$(printf '%s\n' "$grant" | sed -n '1p')"
   COMPANY_NAME="$(printf '%s\n' "$grant" | sed -n '2p')"
   REGISTRY_FROM_MASTER="$(printf '%s\n' "$grant" | sed -n '3p')"
+  ANYDESK_PASSWORD="$(printf '%s\n' "$grant" | sed -n '4p')"
   if [ -z "${NCOMMERCE_TOKEN}" ] || ! grep -q "PRIVATE KEY" "$KEY_FILE"; then
     rm -f "$KEY_FILE"
     echo "A resposta do mestre nao trouxe o token do ncommerce e a chave de leitura."
@@ -357,8 +383,47 @@ read_env_key() {
   printf '%s' "${line#*=}"
 }
 
+# Senha do acesso nao supervisionado. E a mesma em todos os clientes, por isso vem
+# do mestre no resgate do codigo e nao fica escrita neste arquivo nem no disco.
+set_anydesk_password() {
+  if [ -z "${ANYDESK_PASSWORD:-}" ] || ! command -v anydesk >/dev/null 2>&1; then
+    return 0
+  fi
+  sudo -v
+  if printf '%s' "$ANYDESK_PASSWORD" | sudo anydesk --set-password >/dev/null 2>&1; then
+    echo "Acesso nao supervisionado do AnyDesk configurado."
+  else
+    echo "Nao consegui configurar a senha do AnyDesk."
+  fi
+}
+
+# No boot o systemd grava o ID do AnyDesk em $INSTALL_DIR/host. A API manda ao mestre.
+install_anydesk_id_service() {
+  sudo cp "$ROOT/docker/anydesk-id.sh" "$INSTALL_DIR/anydesk-id.sh"
+  sudo chmod 755 "$INSTALL_DIR/anydesk-id.sh"
+  sudo mkdir -p "$INSTALL_DIR/host"
+  sudo tee /etc/systemd/system/ncommerce-anydesk-id.service >/dev/null <<EOF
+[Unit]
+Description=Grava o ID do AnyDesk para o NCommerce
+After=anydesk.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$INSTALL_DIR/anydesk-id.sh $INSTALL_DIR
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  sudo systemctl daemon-reload
+  sudo systemctl enable ncommerce-anydesk-id.service >/dev/null 2>&1 || true
+  sudo "$INSTALL_DIR/anydesk-id.sh" "$INSTALL_DIR" || true
+}
+
 CODE="$(read_code)"
 redeem "$CODE"
+set_anydesk_password
+unset ANYDESK_PASSWORD
 clone_repos
 cleanup_secrets
 
@@ -403,6 +468,7 @@ sudo cp "$ROOT/docker/docker-compose.usb.yml" "$INSTALL_DIR/docker-compose.usb.y
 sudo cp "$ROOT/docker/update.sh" "$INSTALL_DIR/update.sh"
 sudo cp "$ROOT/docker/host-ips.sh" "$INSTALL_DIR/host-ips.sh"
 sudo chmod 755 "$INSTALL_DIR/update.sh"
+install_anydesk_id_service
 sudo tee "$INSTALL_DIR/.env" >/dev/null <<EOF
 CUPS_PORT=${CUPS_PORT}
 NCOMMERCE_REGISTRY=${REGISTRY}

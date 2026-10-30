@@ -389,12 +389,53 @@ function Install-AnyDesk {
 
 Install-AnyDesk
 
+function Get-AnyDeskExe {
+    return @("${env:ProgramFiles(x86)}\AnyDesk\AnyDesk.exe", "$env:ProgramFiles\AnyDesk\AnyDesk.exe") |
+        Where-Object { Test-Path $_ } | Select-Object -First 1
+}
+
+# Senha do acesso nao supervisionado. E a mesma em todos os clientes, por isso vem
+# do mestre no resgate do codigo e nao fica escrita neste arquivo nem no disco.
+function Set-AnyDeskPassword([string]$Password) {
+    $exe = Get-AnyDeskExe
+    if (-not $Password -or -not $exe) { return }
+    $ErrorActionPreference = "Continue"
+    $Password | & $exe --set-password | Out-Null
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = "Stop"
+    if ($code -eq 0) {
+        Write-Host "Acesso nao supervisionado do AnyDesk configurado."
+    } else {
+        Write-Host "Nao consegui configurar a senha do AnyDesk."
+    }
+}
+
+# O Windows nao deixa programa fixar icone na barra de tarefas. O atalho fica na Area de Trabalho,
+# para o suporte dizer "abra o AnyDesk da Area de Trabalho".
+function New-AnyDeskShortcut {
+    $exe = Get-AnyDeskExe
+    $desktop = [Environment]::GetFolderPath("Desktop")
+    if (-not $exe -or -not $desktop) { return }
+    $lnk = Join-Path $desktop "AnyDesk - Suporte NCommerce.lnk"
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($lnk)
+    $shortcut.TargetPath = $exe
+    $shortcut.WorkingDirectory = Split-Path -Parent $exe
+    $shortcut.Description = "Acesso remoto do suporte NCommerce"
+    $shortcut.Save()
+    Write-Host "Atalho: $lnk"
+}
+
+New-AnyDeskShortcut
+
 if (-not (Get-Command curl.exe -CommandType Application -ErrorAction SilentlyContinue)) {
     Fail "Este Windows nao tem curl.exe."
 }
 
 $installCode = Read-InstallCode
 $grant = Get-InstallGrant $installCode
+Set-AnyDeskPassword ([string]$grant.anydesk_password)
+$grant.PSObject.Properties.Remove("anydesk_password")
 $ncommerceToken = [string]$grant.token
 $gitKey = [string]$grant.git_private_key
 Clone-Repos $gitKey
@@ -442,6 +483,7 @@ Copy-Item $composeSrc (Join-Path $InstallDir "docker-compose.yml") -Force
 Copy-Item $startupSrc (Join-Path $InstallDir "ncommerce-docker-startup.bat") -Force
 Copy-Item $updateSrc (Join-Path $InstallDir "ncommerce-docker-update.bat") -Force
 Copy-Item (Join-Path $Root "windows\refresh-host-ips.ps1") (Join-Path $InstallDir "refresh-host-ips.ps1") -Force
+Copy-Item (Join-Path $Root "windows\anydesk-id.ps1") (Join-Path $InstallDir "anydesk-id.ps1") -Force
 Copy-Item (Join-Path $Root "windows\usb-printers.ps1") (Join-Path $InstallDir "usb-printers.ps1") -Force
 Copy-Item (Join-Path $Root "windows\drivers") $InstallDir -Recurse -Force
 
@@ -455,6 +497,7 @@ $envBody = "CUPS_PORT=$cupsPort`nNCOMMERCE_REGISTRY=$registry`nNCOMMERCE_TAG=$ta
 [System.IO.File]::WriteAllText($envFile, $envBody)
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir "refresh-host-ips.ps1") $InstallDir
 if ($LASTEXITCODE -ne 0) { Fail "Nao consegui gravar os IPs desta maquina." }
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir "anydesk-id.ps1") $InstallDir
 
 foreach ($port in @(3000, 4200)) {
     $name = "NCommerce TCP $port"

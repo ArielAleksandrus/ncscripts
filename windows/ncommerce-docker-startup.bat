@@ -35,6 +35,9 @@ cd /d "%DIR%"
 if exist "%DIR%\refresh-host-ips.ps1" (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%DIR%\refresh-host-ips.ps1" "%DIR%"
 )
+if exist "%DIR%\anydesk-id.ps1" (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%DIR%\anydesk-id.ps1" "%DIR%"
+)
 if /I "%~1"=="pull" (
   "%DOCKER%" compose pull
   if errorlevel 1 exit /b 1
