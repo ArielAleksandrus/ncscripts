@@ -1,7 +1,8 @@
 #!/bin/bash
 # Instalador Docker do NCommerce no Linux.
 # Nao use sudo neste arquivo. Ele chama sudo so onde precisa.
-# Pede um codigo de 8 caracteres. O mestre troca esse codigo, uma vez,
+# Usa o codigo de 8 caracteres do codigo-instalacao.txt (zip de ncommerce.app/instalar)
+# ou pede para digitar. O mestre troca esse codigo, uma vez,
 # pelo token da empresa e pela chave privada de leitura (access key SSH).
 # A chave e apagada depois do clone.
 # Reexecutar nao apaga volume.
@@ -129,6 +130,16 @@ read_code() {
   done
 }
 
+# O zip baixado em ncommerce.app/instalar traz o codigo neste arquivo, para o cliente nao digitar.
+code_from_file() {
+  local file="$ROOT/codigo-instalacao.txt" code
+  [ -f "$file" ] || return 0
+  code="$(tr -d '[:space:]-' < "$file" | tr '[:lower:]' '[:upper:]')"
+  if printf '%s' "$code" | grep -Eq '^[A-Z0-9]{8}$'; then
+    printf '%s' "$code"
+  fi
+}
+
 machine_id() {
   local dir="$HOME/.ncommerce-docker" file
   file="$dir/machine-id"
@@ -157,14 +168,15 @@ redeem() {
     echo "Nao consegui falar com ${MASTER_URL}. Confira a rede e se o mestre esta no ar."
     exit 1
   }
+  # Codigo recusado volta 1 em vez de sair, para o instalador pedir outro codigo.
   if [ "$http" != "200" ]; then
-    echo "Codigo recusado (HTTP ${http})."
+    echo "Codigo ${code} recusado (HTTP ${http})."
     if [ -s "$body" ]; then
       head -c 500 "$body" >&2 || true
       echo >&2
     fi
     rm -f "$body"
-    exit 1
+    return 1
   fi
   KEY_FILE="$(mktemp)"
   chmod 600 "$KEY_FILE"
@@ -420,8 +432,17 @@ EOF
   sudo "$INSTALL_DIR/anydesk-id.sh" "$INSTALL_DIR" || true
 }
 
-CODE="$(read_code)"
-redeem "$CODE"
+CODE="$(code_from_file)"
+if [ -n "$CODE" ]; then
+  echo "Usando o codigo de instalacao $CODE do arquivo codigo-instalacao.txt."
+fi
+if [ -z "$CODE" ] || ! redeem "$CODE"; then
+  if [ -n "$CODE" ]; then
+    echo "Peca um codigo novo ao suporte e digite abaixo."
+  fi
+  CODE="$(read_code)"
+  redeem "$CODE" || exit 1
+fi
 set_anydesk_password
 unset ANYDESK_PASSWORD
 clone_repos

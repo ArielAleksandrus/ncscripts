@@ -2,7 +2,8 @@
 <#
   Instalador Docker do NCommerce no Windows.
 
-  Pede um codigo de 8 caracteres. O mestre troca esse codigo, uma vez,
+  Usa o codigo de 8 caracteres do codigo-instalacao.txt, que vem no zip
+  de ncommerce.app/instalar, ou pede para digitar. O mestre troca esse codigo, uma vez,
   pelo token da empresa e pela chave privada de leitura (access key SSH).
   A chave e apagada depois do clone.
   Reexecutar nao apaga volume.
@@ -37,6 +38,15 @@ function Read-InstallCode {
     }
 }
 
+# O zip baixado em ncommerce.app/instalar traz o codigo neste arquivo, para o cliente nao digitar.
+function Read-CodeFile {
+    $file = Join-Path $Root "codigo-instalacao.txt"
+    if (-not (Test-Path $file)) { return $null }
+    $code = ((Get-Content -Raw -Path $file) -replace "[\s\-]", "").ToUpper()
+    if ($code -match "^[A-Z0-9]{8}$") { return $code }
+    return $null
+}
+
 function Get-MachineId {
     $dir = Join-Path $env:ProgramData "NCommerce"
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
@@ -47,7 +57,8 @@ function Get-MachineId {
     return (Get-Content -Raw -Path $file).Trim()
 }
 
-function Get-InstallGrant([string]$Code) {
+# Com -Soft, codigo recusado devolve $null em vez de encerrar, para pedir outro codigo.
+function Get-InstallGrant([string]$Code, [switch]$Soft) {
     $machineId = Get-MachineId
     $payloadFile = New-TemporaryFile
     $bodyFile = New-TemporaryFile
@@ -68,6 +79,10 @@ function Get-InstallGrant([string]$Code) {
             if ($detail -and $detail.Length -gt 500) { $detail = $detail.Substring(0, 500) }
         }
         Remove-Item $bodyFile.FullName -Force -ErrorAction SilentlyContinue
+        if ($Soft) {
+            Write-Host "Codigo $Code recusado (HTTP $http). $detail"
+            return $null
+        }
         Fail "Codigo recusado (HTTP $http). $detail"
     }
     try {
@@ -515,8 +530,17 @@ if (-not (Test-DockerReady)) {
     }
 }
 
-$installCode = Read-InstallCode
-$grant = Get-InstallGrant $installCode
+$grant = $null
+$installCode = Read-CodeFile
+if ($installCode) {
+    Write-Host "Usando o codigo de instalacao $installCode do arquivo codigo-instalacao.txt."
+    $grant = Get-InstallGrant $installCode -Soft
+    if (-not $grant) { Write-Host "Peca um codigo novo ao suporte e digite abaixo." }
+}
+if (-not $grant) {
+    $installCode = Read-InstallCode
+    $grant = Get-InstallGrant $installCode
+}
 Set-AnyDeskPassword ([string]$grant.anydesk_password)
 $grant.PSObject.Properties.Remove("anydesk_password")
 $ncommerceToken = [string]$grant.token
