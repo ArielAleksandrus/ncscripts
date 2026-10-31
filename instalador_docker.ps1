@@ -213,12 +213,15 @@ function Clone-Repos([string]$GitKey) {
         if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
         Write-Host "Clonando $repo..."
         $ErrorActionPreference = "Continue"
-        & git.exe clone --quiet "git@bitbucket.org:Aleksandrus/$repo.git" $dest
+        # A saida do git entra na mensagem: chave recusada, rede caindo e nome de arquivo
+        # que o Windows nao aceita (aux, con, nul...) falham todos aqui.
+        $cloneOut = & git.exe clone --quiet "git@bitbucket.org:Aleksandrus/$repo.git" $dest 2>&1 | ForEach-Object { "$_" }
         $cloneCode = $LASTEXITCODE
         $ErrorActionPreference = "Stop"
         if ($cloneCode -ne 0) {
             if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
-            Fail "Nao consegui clonar $repo. A chave de leitura do Bitbucket foi recusada."
+            $detail = (@($cloneOut) | Where-Object { $_ -match "\S" } | Select-Object -Last 4) -join " "
+            Fail "Nao consegui clonar $repo (git saiu com $cloneCode). $detail"
         }
     }
     Remove-Secrets
