@@ -364,7 +364,7 @@ function Initialize-Wsl {
     if ($rebootNeeded) {
         Write-Host ""
         Write-Host "O Windows precisa reiniciar para terminar de ligar o WSL2." -ForegroundColor Yellow
-        Write-Host "Depois do reinicio, rode o instalador_docker.bat de novo. O codigo de instalacao ainda nao foi usado." -ForegroundColor Yellow
+        Write-Host "Depois do reinicio, rode o InstaladorWindows.bat de novo. O codigo de instalacao ainda nao foi usado." -ForegroundColor Yellow
         Read-Host "Pressione Enter para reiniciar agora (ou feche a janela para reiniciar depois)"
         Restart-Computer
         exit 0
