@@ -475,6 +475,46 @@ if (-not (Get-Command curl.exe -CommandType Application -ErrorAction SilentlyCon
     Fail "Este Windows nao tem curl.exe."
 }
 
+# O Docker fica pronto antes de pedir o codigo: se ele travar, o codigo nao e gasto.
+if (-not (Test-Path $DockerExe)) {
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Fail "Docker Desktop nao esta instalado e o winget nao existe. Instale o Docker Desktop e rode este arquivo de novo."
+    }
+    Write-Host "Instalando Docker Desktop. Isso pode levar varios minutos."
+    # --accept-license pula a tela de termos no primeiro uso. --always-run-service deixa o servico
+    # do Docker subir sem admin, para a tarefa de logon funcionar com o usuario comum.
+    & winget install --exact --id Docker.DockerDesktop --accept-package-agreements --accept-source-agreements --disable-interactivity `
+        --override "install --quiet --accept-license --backend=wsl-2 --always-run-service"
+    if (-not (Test-Path $DockerExe)) {
+        Fail "Docker Desktop nao apareceu. Se o Windows pediu reinicio, reinicie e rode o instalador de novo."
+    }
+}
+
+# Quem usa o PC precisa estar no grupo docker-users para a tarefa de logon falar com o Docker.
+$me = "$env:USERDOMAIN\$env:USERNAME"
+$members = @(Get-LocalGroupMember -Group "docker-users" -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+if ($members -notcontains $me) {
+    try {
+        Add-LocalGroupMember -Group "docker-users" -Member $me -ErrorAction Stop
+    } catch {
+        Write-Host "Nao consegui colocar $me no grupo docker-users: $($_.Exception.Message)"
+    }
+}
+
+if (-not (Test-DockerReady)) {
+    # Pelo explorer o Docker Desktop abre como o usuario comum, e nao como admin, igual ao logon.
+    if (Test-Path $DockerDesktop) { Start-Process explorer.exe -ArgumentList "`"$DockerDesktop`"" }
+    Write-Host "Esperando o Docker Desktop ficar pronto. Na primeira vez pode levar uns 10 minutos..."
+    $ready = $false
+    for ($i = 0; $i -lt 150; $i++) {
+        if (Test-DockerReady) { $ready = $true; break }
+        Start-Sleep -Seconds 5
+    }
+    if (-not $ready) {
+        Fail "O Docker nao ficou pronto. Reinicie o computador e rode este instalador de novo. O codigo de instalacao ainda nao foi usado."
+    }
+}
+
 $installCode = Read-InstallCode
 $grant = Get-InstallGrant $installCode
 Set-AnyDeskPassword ([string]$grant.anydesk_password)
@@ -483,30 +523,6 @@ $ncommerceToken = [string]$grant.token
 $gitKey = [string]$grant.git_private_key
 Clone-Repos $gitKey
 $gitKey = $null
-
-if (-not (Test-Path $DockerExe)) {
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        Fail "Docker Desktop nao esta instalado e o winget nao existe. Instale o Docker Desktop e rode este arquivo de novo."
-    }
-    Write-Host "Instalando Docker Desktop. Isso pode levar varios minutos."
-    & winget install --exact --id Docker.DockerDesktop --accept-package-agreements --accept-source-agreements --disable-interactivity
-    if (-not (Test-Path $DockerExe)) {
-        Fail "Docker Desktop nao apareceu. Se o Windows pediu reinicio, reinicie e rode o instalador de novo."
-    }
-}
-
-if (-not (Test-DockerReady)) {
-    if (Test-Path $DockerDesktop) { Start-Process $DockerDesktop }
-    Write-Host "Esperando o Docker Desktop ficar pronto..."
-    $ready = $false
-    for ($i = 0; $i -lt 60; $i++) {
-        if (Test-DockerReady) { $ready = $true; break }
-        Start-Sleep -Seconds 5
-    }
-    if (-not $ready) {
-        Fail "O Docker nao ficou pronto. Abra o Docker Desktop, conclua o primeiro uso e rode este instalador de novo."
-    }
-}
 
 $cupsPort = 631
 $listen = Get-NetTCPConnection -LocalPort 631 -State Listen -ErrorAction SilentlyContinue
