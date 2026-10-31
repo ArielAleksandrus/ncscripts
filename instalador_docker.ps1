@@ -153,7 +153,7 @@ function Install-GitIfMissing {
         Fail "Git nao esta instalado e o winget nao existe."
     }
     Write-Host "Instalando Git..."
-    & winget install --exact --id Git.Git --accept-package-agreements --accept-source-agreements --disable-interactivity
+    & winget install --source winget --exact --id Git.Git --accept-package-agreements --accept-source-agreements --disable-interactivity
     $machine = [Environment]::GetEnvironmentVariable("Path", "Machine")
     $user = [Environment]::GetEnvironmentVariable("Path", "User")
     $env:Path = "$machine;$user"
@@ -398,6 +398,22 @@ function Initialize-Wsl {
 
 Initialize-Wsl
 
+# Windows recem-instalado marca a rede como Publica, e a regra do OpenSSH so vale em rede Privada.
+# A rede em que o PC esta agora e a da loja, entao ela vira Privada. Redes de dominio ficam como estao.
+function Set-StoreNetworkPrivate {
+    try {
+        $public = @(Get-NetConnectionProfile -ErrorAction Stop | Where-Object { $_.NetworkCategory -eq "Public" })
+        foreach ($p in $public) {
+            Set-NetConnectionProfile -InterfaceIndex $p.InterfaceIndex -NetworkCategory Private -ErrorAction Stop
+            Write-Host "Rede '$($p.Name)' marcada como Privada."
+        }
+    } catch {
+        Write-Host "Nao consegui marcar a rede como Privada: $($_.Exception.Message)"
+    }
+}
+
+Set-StoreNetworkPrivate
+
 function Enable-OpenSshServer {
     Write-Host "Abrindo o SSH na porta 22..."
     try {
@@ -439,7 +455,7 @@ function Install-AnyDesk {
         return
     }
     Write-Host "Instalando o AnyDesk..."
-    & winget install --exact --id AnyDeskSoftwareGmbH.AnyDesk --accept-package-agreements --accept-source-agreements --disable-interactivity
+    & winget install --source winget --exact --id AnyDesk.AnyDesk --accept-package-agreements --accept-source-agreements --disable-interactivity
     if (-not ($paths | Where-Object { Test-Path $_ })) {
         Write-Host "Nao consegui instalar o AnyDesk. Instale depois em https://anydesk.com."
     }
@@ -498,7 +514,7 @@ if (-not (Test-Path $DockerExe)) {
     Write-Host "Instalando Docker Desktop. Isso pode levar varios minutos."
     # --accept-license pula a tela de termos no primeiro uso. --always-run-service deixa o servico
     # do Docker subir sem admin, para a tarefa de logon funcionar com o usuario comum.
-    & winget install --exact --id Docker.DockerDesktop --accept-package-agreements --accept-source-agreements --disable-interactivity `
+    & winget install --source winget --exact --id Docker.DockerDesktop --accept-package-agreements --accept-source-agreements --disable-interactivity `
         --override "install --quiet --accept-license --backend=wsl-2 --always-run-service"
     if (-not (Test-Path $DockerExe)) {
         Fail "Docker Desktop nao apareceu. Se o Windows pediu reinicio, reinicie e rode o instalador de novo."
