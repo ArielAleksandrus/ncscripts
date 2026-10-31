@@ -340,6 +340,49 @@ rm -rf /tmp/ncommerce.zip /tmp/ncommerce-restore /tmp/ncommerce-restore.sh
     Write-Host "Backup restaurado nos containers."
 }
 
+# O Docker Desktop roda em cima do WSL2. Num Windows recem-formatado o WSL nao esta ligado,
+# o Docker pede reinicio e o codigo de instalacao, que so vale uma vez, ja teria sido gasto.
+# Por isso o WSL e preparado aqui, antes de pedir o codigo.
+function Initialize-Wsl {
+    if (Test-DockerReady) { return }
+
+    # Com o hypervisor ja rodando, o Windows informa VirtualizationFirmwareEnabled = False.
+    $hypervisor = (Get-CimInstance Win32_ComputerSystem).HypervisorPresent
+    $firmware = (Get-CimInstance Win32_Processor | Select-Object -First 1).VirtualizationFirmwareEnabled
+    if (-not $hypervisor -and -not $firmware) {
+        Fail "A virtualizacao esta desligada na BIOS. Ligue Intel VT-x (ou AMD-V / SVM) e rode o instalador de novo."
+    }
+
+    $rebootNeeded = $false
+    foreach ($f in @("Microsoft-Windows-Subsystem-Linux", "VirtualMachinePlatform")) {
+        if ((Get-WindowsOptionalFeature -Online -FeatureName $f).State -ne "Enabled") {
+            Write-Host "Ligando $f..."
+            $result = Enable-WindowsOptionalFeature -Online -FeatureName $f -All -NoRestart
+            if ($result.RestartNeeded) { $rebootNeeded = $true }
+        }
+    }
+    if ($rebootNeeded) {
+        Write-Host ""
+        Write-Host "O Windows precisa reiniciar para terminar de ligar o WSL2." -ForegroundColor Yellow
+        Write-Host "Depois do reinicio, rode o instalador_docker.bat de novo. O codigo de instalacao ainda nao foi usado." -ForegroundColor Yellow
+        Read-Host "Pressione Enter para reiniciar agora (ou feche a janela para reiniciar depois)"
+        Restart-Computer
+        exit 0
+    }
+
+    # O WSL que vem no Windows e antigo para o Docker Desktop. Falha aqui nao para a instalacao:
+    # o proprio Docker Desktop pede a atualizacao no primeiro uso.
+    Write-Host "Atualizando o WSL..."
+    $ErrorActionPreference = "Continue"
+    & wsl.exe --update *> $null
+    $updateCode = $LASTEXITCODE
+    & wsl.exe --set-default-version 2 *> $null
+    $ErrorActionPreference = "Stop"
+    if ($updateCode -ne 0) { Write-Host "Nao consegui atualizar o WSL (codigo $updateCode)." }
+}
+
+Initialize-Wsl
+
 function Enable-OpenSshServer {
     Write-Host "Abrindo o SSH na porta 22..."
     try {
