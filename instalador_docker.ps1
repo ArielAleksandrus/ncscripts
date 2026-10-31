@@ -7,7 +7,10 @@
   pelo token da empresa e pela chave privada de leitura (access key SSH).
   A chave e apagada depois do clone.
   Reexecutar nao apaga volume.
+
+  -IgnorarRequisitos instala num PC abaixo do minimo (suporte, por conta e risco).
 #>
+param([switch]$IgnorarRequisitos)
 
 $ErrorActionPreference = "Stop"
 $InstallDir = "C:\NCommerce"
@@ -357,6 +360,31 @@ rm -rf /tmp/ncommerce.zip /tmp/ncommerce-restore /tmp/ncommerce-restore.sh
     New-Item -ItemType File -Force -Path $marker | Out-Null
     Write-Host "Backup restaurado nos containers."
 }
+
+# MySQL, API, CUPS e o WSL do Docker Desktop juntos nao cabem em 4 GB: o PC passa a
+# usar o arquivo de paginacao e o caixa fica lento. Barra antes de qualquer instalacao.
+function Assert-MinimumHardware {
+    $problems = @()
+    $build = [int](Get-CimInstance Win32_OperatingSystem).BuildNumber
+    if ($build -lt 22000) { $problems += "Windows 11 (este e o build $build)" }
+    $threads = (Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
+    if ($threads -lt 4) { $problems += "processador com 4 threads (este tem $threads)" }
+    # Um PC de 8 GB informa um pouco menos por causa da memoria reservada ao video.
+    $ramGb = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 1)
+    if ($ramGb -lt 7.5) { $problems += "8 GB de RAM (este tem $ramGb GB)" }
+    if ($problems.Count -eq 0) { return }
+
+    Write-Host ""
+    Write-Host "Este computador nao atende o minimo do NCommerce:" -ForegroundColor Red
+    $problems | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
+    if ($IgnorarRequisitos) {
+        Write-Host "Seguindo mesmo assim (-IgnorarRequisitos)." -ForegroundColor Yellow
+        return
+    }
+    Fail "Use um computador com Windows 11, 4 threads e 8 GB de RAM."
+}
+
+Assert-MinimumHardware
 
 # O Docker Desktop roda em cima do WSL2. Num Windows recem-formatado o WSL nao esta ligado,
 # o Docker pede reinicio e o codigo de instalacao, que so vale uma vez, ja teria sido gasto.
@@ -741,4 +769,4 @@ Write-Host "Codigo-fonte em C:\NCommerce\src (ncommerce_api, ncommerce, nfce)."
 Write-Host "A tarefa '$TaskName' sobe a stack quando alguem entra no Windows."
 Write-Host "Depois de uma queda de energia o PC precisa logar sozinho: netplwiz."
 Write-Host "Atualizar: atalho Atualizar NCommerce na Area de Trabalho."
-Write-Host "Impressora USB plugada depois: rode $InstallDir\usb-printers.ps1 como admin."
+Write-Host "Impressora USB plugada depois: o Windows compartilha sozinho e ela aparece no CUPS em ate 5 minutos."
