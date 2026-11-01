@@ -1,4 +1,4 @@
-# Impressora USB no Linux. O instalador_docker.sh liga este arquivo pelo COMPOSE_FILE do .env.
+# Impressora USB no Linux. O instalador_linux.sh liga este arquivo pelo COMPOSE_FILE do .env.
 # No Windows o Docker Desktop nao ve USB: la a impressora vai por LPD.
 # O CUPS do host nao pode ter fila para a mesma impressora, senao os dois disputam o aparelho.
 

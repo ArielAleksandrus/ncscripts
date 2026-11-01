@@ -15,7 +15,7 @@ REQUESTED_REGISTRY="${NCOMMERCE_REGISTRY:-}"
 REQUESTED_TAG="${NCOMMERCE_TAG:-}"
 
 if [ "$(id -u)" -eq 0 ]; then
-  echo "Rode sem sudo. Exemplo: ./instalador_docker.sh"
+  echo "Rode sem sudo. Exemplo: ./instalador_linux.sh"
   exit 1
 fi
 

@@ -1,3 +1,23 @@
+INSTALACAO NORMAL (Docker): use os instaladores da raiz do ncscripts
+  - Windows: InstaladorWindows.bat (duplo clique)
+  - Linux:   ./instalador_linux.sh
+Os dois pedem o codigo de instalacao de 8 caracteres. Ele aparece no ncommerce_manager,
+na pagina da empresa (botao "Novo codigo"), ou ja vem no codigo-instalacao.txt do zip de
+ncommerce.app/instalar.
+
+ESTA PASTA (advanced/)
+  - instalador_nativo.sh: instala sem Docker num Ubuntu (rbenv, nginx, mysql etc.).
+    Rode da raiz: ./advanced/instalador_nativo.sh
+    Usa o mesmo codigo de instalacao do ncommerce_manager. A chave do tunel Nlabs e o
+    ID do AnyDesk vao sozinhos para o manager, nada para colar no servidor.
+  - windows-wsl/: instalacao nativa dentro do WSL de um PC Windows (ver README.txt la).
+  - setup1.sh.old ... setup5.sh.old e mysql-setup.sql.old: o passo a passo antigo, abaixo.
+    Nao devem ser mais usados. Para rodar um, tire o .old.
+
+=====================================================================
+PASSO A PASSO ANTIGO (setup1..5, substituido pelo instalador_nativo.sh)
+=====================================================================
+
 Depois do Ubuntu 20 instalado, baixe e execute os seguintes scripts:
 
 https://github.com/ArielAleksandrus/ncscripts/archive/refs/heads/master.zip

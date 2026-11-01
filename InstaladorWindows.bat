@@ -9,5 +9,5 @@ if %errorLevel% neq 0 (
 )
 
 cd /d "%~dp0"
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0instalador_docker.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0windows\instalador_windows.ps1"
 pause

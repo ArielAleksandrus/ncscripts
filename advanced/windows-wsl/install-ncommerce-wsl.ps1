@@ -4,7 +4,7 @@
 
   Prepares a Windows machine to host NCommerce (API + front + NFC-e) inside
   WSL2 Ubuntu 24.04, then copies ncscripts into the distro and opens a shell
-  so you can run instalador_unico.sh the same way as on a real Ubuntu PC.
+  so you can run advanced/instalador_nativo.sh the same way as on a real Ubuntu PC.
 
   Re-run safe: skips steps that are already done.
 #>
@@ -76,7 +76,7 @@ function Get-WslDefaultUser {
 }
 
 # With a missing/skipped first-run setup WSL logs in as root, and then
-# instalador_unico.sh would install into /root instead of /home/<user>.
+# instalador_nativo.sh would install into /root instead of /home/<user>.
 function Ensure-WslUser {
     $ErrorActionPreference = "Continue"
     $current = Get-WslDefaultUser
@@ -372,8 +372,9 @@ if (Test-Path $startupBat) {
 }
 
 # 8. Copy ncscripts into Ubuntu and open a shell on them ---------------------
-$ncscriptsRoot = Split-Path -Parent $scriptDir
-$installer = Join-Path $ncscriptsRoot "instalador_unico.sh"
+# Este script fica em advanced/windows-wsl/; a raiz do ncscripts e dois niveis acima.
+$ncscriptsRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
+$installer = Join-Path $ncscriptsRoot "advanced\instalador_nativo.sh"
 if (Test-Path $installer) {
     Write-Host "Copying ncscripts into $Distro ~/ncscripts ..."
     # Built here instead of via wslpath: reading wslpath output through the
@@ -381,17 +382,17 @@ if (Test-Path $installer) {
     $full = (Resolve-Path $ncscriptsRoot).Path
     $winPathForWsl = "/mnt/" + $full.Substring(0, 1).ToLower() + ($full.Substring(2) -replace '\\', '/')
     # sed strips CRLF in case the repo was cloned with Git for Windows autocrlf.
-    wsl -d $Distro -- bash -lc "mkdir -p `$HOME/ncscripts && cp -a '$winPathForWsl'/. `$HOME/ncscripts/ && sed -i 's/\r`$//' `$HOME/ncscripts/*.sh && chmod +x `$HOME/ncscripts/*.sh"
+    wsl -d $Distro -- bash -lc "mkdir -p `$HOME/ncscripts && cp -a '$winPathForWsl'/. `$HOME/ncscripts/ && sed -i 's/\r`$//' `$HOME/ncscripts/*.sh `$HOME/ncscripts/advanced/*.sh && chmod +x `$HOME/ncscripts/*.sh `$HOME/ncscripts/advanced/*.sh"
     if ($LASTEXITCODE -ne 0) { Fail "Could not copy ncscripts into $Distro." }
 } else {
-    Write-Host "instalador_unico.sh not next to windows/. You will need to download ncscripts inside Ubuntu." -ForegroundColor Yellow
+    Write-Host "advanced/instalador_nativo.sh not found. You will need to download ncscripts inside Ubuntu." -ForegroundColor Yellow
 }
 
 Write-Host ""
 Write-Host "=== WSL2 / Ubuntu 24.04 is ready. ===" -ForegroundColor Cyan
 Write-Host "Inside the Ubuntu shell, run:"
 Write-Host "  cd ~/ncscripts"
-Write-Host "  ./instalador_unico.sh"
+Write-Host "  ./advanced/instalador_nativo.sh"
 Write-Host ""
 Write-Host "That script still asks for the NCommerce token, Linux user, Bitbucket SSH key"
 Write-Host "and Dropbox login - same as a real Ubuntu install. It will NOT reboot Windows."

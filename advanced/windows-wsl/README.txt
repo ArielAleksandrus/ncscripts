@@ -3,9 +3,9 @@ Instalação NCommerce em um PC Windows (WSL2 + Ubuntu 24.04)
 
 O ERP (ncommerce_api, ncommerce, nfce) continua sendo Linux. Estes
 scripts só preparam o Windows para parecer um Ubuntu na LAN, e então
-chamam o mesmo instalador_unico.sh dos PCs Ubuntu.
+chamam o mesmo advanced/instalador_nativo.sh dos PCs Ubuntu.
 
-O instalador_unico.sh roda em Ubuntu 20.04, 22.04, 24.04 e 26.04 (ele
+O instalador_nativo.sh roda em Ubuntu 20.04, 22.04, 24.04 e 26.04 (ele
 detecta a versão sozinho). No Windows, este script sempre instala o
 Ubuntu 24.04 no WSL; as outras versões são para PCs com Ubuntu físico.
 
@@ -32,12 +32,12 @@ O QUE O WINDOWS FAZ SOZINHO
 
 O QUE AINDA É MANUAL (igual Ubuntu físico)
 ------------------------------------------
-  ./instalador_unico.sh
+  ./advanced/instalador_nativo.sh
     - token NCommerce
     - usuário Linux
     - colar a chave SSH no Bitbucket
     - login Dropbox da empresa
-  Depois, como no readme.txt da raiz:
+  Depois, como no advanced/readme.txt:
     - TeamViewer/AnyDesk: instalar NO WINDOWS (o instalador pula no WSL)
     - IP fixo no Windows
     - impressoras (USB no WSL é limitado — ver abaixo)

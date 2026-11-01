@@ -22,7 +22,8 @@ if ($env:NCOMMERCE_MASTER_URL) {
 }
 $DockerExe = Join-Path $env:ProgramFiles "Docker\Docker\resources\bin\docker.exe"
 $DockerDesktop = Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+# Este script fica em windows/; a raiz do ncscripts (docker/, windows/, codigo-instalacao.txt) e a pasta acima.
+$Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 
 function Fail($msg) {
     Remove-Secrets

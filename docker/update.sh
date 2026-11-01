@@ -11,7 +11,7 @@ if [ "$(id -u)" -eq 0 ]; then
 fi
 
 if [ ! -f "$INSTALL_DIR/docker-compose.yml" ]; then
-  echo "Nao achei $INSTALL_DIR/docker-compose.yml. Rode instalador_docker.sh antes."
+  echo "Nao achei $INSTALL_DIR/docker-compose.yml. Rode instalador_linux.sh antes."
   exit 1
 fi
 

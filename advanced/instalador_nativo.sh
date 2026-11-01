@@ -1,6 +1,6 @@
 #!/bin/bash
 # =====================================================
-# INSTALADOR ÚNICO NCOMMERCE - Ubuntu 20.04 / 22.04 / 24.04 / 26.04 e WSL (RESUMÍVEL + ROBUSTO)
+# INSTALADOR NATIVO NCOMMERCE (sem Docker) - Ubuntu 20.04 / 22.04 / 24.04 / 26.04 e WSL (RESUMÍVEL + ROBUSTO)
 # ✅ Não duplica rbenv • ✅ Pula clones já feitos • ✅ Corrige dependências
 # =====================================================
 
@@ -14,7 +14,7 @@ fi
 # Os caminhos /home/<usuario> precisam ser os do usuário que roda o script.
 LINUX_USER="$(id -un)"
 if [ "$LINUX_USER" = "root" ]; then
-  echo "❌ Não rode como root (nem com sudo). Entre com o usuário Linux normal e rode ./instalador_unico.sh"
+  echo "❌ Não rode como root (nem com sudo). Entre com o usuário Linux normal e rode ./advanced/instalador_nativo.sh"
   exit 1
 fi
 
@@ -77,6 +77,9 @@ INSTALL_CODE_FILE="$PROGRESS_DIR/install-code"
 TOKEN_FILE="$PROGRESS_DIR/token"
 MACHINE_FILE="$PROGRESS_DIR/machine-id"
 KEY_FILE="$PROGRESS_DIR/git-read-key"
+# Senha do acesso nao supervisionado do AnyDesk, igual em todas as lojas. Vem no resgate do
+# codigo e e apagada assim que o AnyDesk e instalado.
+ANYDESK_PASSWORD_FILE="$PROGRESS_DIR/anydesk-password"
 MASTER_URL="${NCOMMERCE_MASTER_URL:-https://ncommerce.app:3001}"
 
 read_install_code() {
@@ -93,8 +96,30 @@ read_install_code() {
   done
 }
 
+# O codigo vem do ncommerce_manager (pagina da empresa) ou do codigo-instalacao.txt que o
+# zip de ncommerce.app/instalar traz na raiz. Este script fica em advanced/, um nivel abaixo.
+code_from_file() {
+  local dir file code
+  dir="$(cd "$(dirname "$0")" && pwd)"
+  for file in "$dir/codigo-instalacao.txt" "$dir/../codigo-instalacao.txt"; do
+    [ -f "$file" ] || continue
+    code="$(tr -d '[:space:]-' < "$file" | tr '[:lower:]' '[:upper:]')"
+    if printf '%s' "$code" | grep -Eq '^[A-Z0-9]{8}$'; then
+      printf '%s' "$code"
+      return 0
+    fi
+  done
+}
+
 if [ ! -s "$TOKEN_FILE" ] && [ ! -s "$INSTALL_CODE_FILE" ]; then
-  read_install_code
+  FILE_CODE="$(code_from_file || true)"
+  if [ -n "$FILE_CODE" ]; then
+    echo "Usando o codigo de instalacao $FILE_CODE do arquivo codigo-instalacao.txt."
+    printf '%s' "$FILE_CODE" > "$INSTALL_CODE_FILE"
+    chmod 600 "$INSTALL_CODE_FILE"
+  else
+    read_install_code
+  fi
 fi
 echo "Usuário Linux: $LINUX_USER"
 
@@ -119,9 +144,10 @@ redeem_install_code() {
     fi
     chmod 600 "$MACHINE_FILE"
   fi
-  python3 - "$MASTER_URL" "$INSTALL_CODE_FILE" "$MACHINE_FILE" "$TOKEN_FILE" "$KEY_FILE" <<'PY'
-import json, socket, sys, urllib.error, urllib.request
-master, code_path, machine_path, token_path, key_path = sys.argv[1:]
+  # Codigo recusado (expirado, usado em outro PC, digitado errado): pede outro em vez de sair.
+  until python3 - "$MASTER_URL" "$INSTALL_CODE_FILE" "$MACHINE_FILE" "$TOKEN_FILE" "$KEY_FILE" "$ANYDESK_PASSWORD_FILE" <<'PY'
+import json, os, socket, sys, urllib.error, urllib.request
+master, code_path, machine_path, token_path, key_path, anydesk_path = sys.argv[1:]
 code = open(code_path).read().strip()
 machine = open(machine_path).read().strip()
 host = "".join(ch for ch in socket.gethostname() if ch.isalnum() or ch in ".-")[:100]
@@ -160,7 +186,16 @@ if not token or "PRIVATE KEY" not in key:
     sys.exit(1)
 open(token_path, "w").write(token + "\n")
 open(key_path, "w").write(key)
+anydesk = data.get("anydesk_password")
+if isinstance(anydesk, str) and anydesk.strip():
+    fd = os.open(anydesk_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(anydesk.strip())
 PY
+  do
+    echo "Peca um codigo novo ao suporte (ncommerce_manager, pagina da empresa, Novo codigo) e digite abaixo."
+    read_install_code
+  done
   chmod 600 "$TOKEN_FILE" "$KEY_FILE"
   if is_step_done 4; then
     shred -u "$KEY_FILE" 2>/dev/null || rm -f "$KEY_FILE"
@@ -338,19 +373,12 @@ EOF
   echo "══════════════════════════════════════════════════════════════"
   read -r -p "Pressione ENTER depois de logar no Dropbox (ou ENTER para seguir sem backup)..."
 
+  # Chave do tunel Nlabs. A API a manda ao mestre e o ncommerce_manager a autoriza para o
+  # usuario ncommerce-tunnel, como no Docker. Nada para colar no servidor.
   mkdir -p ~/.ssh
-  if [ ! -f ~/.ssh/id_rsa ]; then
-    ssh-keygen -t rsa -b 4096 -N "" -f ~/.ssh/id_rsa -q
+  if [ ! -f ~/.ssh/id_ed25519 ]; then
+    ssh-keygen -t ed25519 -N "" -C "ncommerce-$(hostname)" -f ~/.ssh/id_ed25519 -q
   fi
-
-  echo ""
-  echo "══════════════════════════════════════════════════════════════"
-  echo "🔑 COPIE A CHAVE PÚBLICA ABAIXO e adicione no servidor Nlabs (authorized_keys do usuário nlabs em tunnel.nlabs.live):"
-  echo ""
-  cat ~/.ssh/id_rsa.pub
-  echo ""
-  echo "══════════════════════════════════════════════════════════════"
-  read -r -p "✅ Pressione ENTER quando a chave já estiver adicionada no servidor Nlabs..."
   mark_step_done 3
 fi
 echo
@@ -386,7 +414,7 @@ else
       if ! git clone "git@bitbucket.org:Aleksandrus/$repo.git"; then
         echo ""
         echo "❌ Não consegui clonar $repo. A access key de leitura do Bitbucket foi recusada."
-        echo "Depois rode ./instalador_unico.sh de novo (ele continua deste passo)."
+        echo "Depois rode ./advanced/instalador_nativo.sh de novo (ele continua deste passo)."
         exit 1
       fi
     else
@@ -481,7 +509,15 @@ else
     wget -qO - https://keys.anydesk.com/repos/DEB-GPG-KEY | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/anydesk.gpg > /dev/null
     echo "deb http://deb.anydesk.com/ all main" | sudo tee /etc/apt/sources.list.d/anydesk-stable.list
     sudo apt update && sudo apt install -y anydesk
+    if [ -s "$ANYDESK_PASSWORD_FILE" ] && command -v anydesk >/dev/null 2>&1; then
+      if sudo anydesk --set-password < "$ANYDESK_PASSWORD_FILE" >/dev/null 2>&1; then
+        echo "Acesso nao supervisionado do AnyDesk configurado."
+      else
+        echo "⚠️  Nao consegui configurar a senha do AnyDesk."
+      fi
+    fi
   fi
+  shred -u "$ANYDESK_PASSWORD_FILE" 2>/dev/null || rm -f "$ANYDESK_PASSWORD_FILE"
 
   echo "Corrigindo dependências quebradas..."
   sudo apt install --fix-broken -y
