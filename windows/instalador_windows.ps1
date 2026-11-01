@@ -363,16 +363,17 @@ rm -rf /tmp/ncommerce.zip /tmp/ncommerce-restore /tmp/ncommerce-restore.sh
 }
 
 # MySQL, API, CUPS e o WSL do Docker Desktop juntos nao cabem em 4 GB: o PC passa a
-# usar o arquivo de paginacao e o caixa fica lento. Barra antes de qualquer instalacao.
+# usar o arquivo de paginacao e o caixa fica lento. 6 GB bastam. Clock nao e exigido:
+# um processador com 4 threads dificilmente e lento demais. Barra antes de qualquer instalacao.
 function Assert-MinimumHardware {
     $problems = @()
     $build = [int](Get-CimInstance Win32_OperatingSystem).BuildNumber
     if ($build -lt 22000) { $problems += "Windows 11 (este e o build $build)" }
     $threads = (Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
     if ($threads -lt 4) { $problems += "processador com 4 threads (este tem $threads)" }
-    # Um PC de 8 GB informa um pouco menos por causa da memoria reservada ao video.
+    # Um PC de 6 GB informa um pouco menos por causa da memoria reservada ao video.
     $ramGb = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 1)
-    if ($ramGb -lt 7.5) { $problems += "8 GB de RAM (este tem $ramGb GB)" }
+    if ($ramGb -lt 5.5) { $problems += "6 GB de RAM (este tem $ramGb GB)" }
     if ($problems.Count -eq 0) { return }
 
     Write-Host ""
@@ -382,7 +383,7 @@ function Assert-MinimumHardware {
         Write-Host "Seguindo mesmo assim (-IgnorarRequisitos)." -ForegroundColor Yellow
         return
     }
-    Fail "Use um computador com Windows 11, 4 threads e 8 GB de RAM."
+    Fail "Use um computador com Windows 11, 4 threads e 6 GB de RAM."
 }
 
 Assert-MinimumHardware

@@ -6,7 +6,16 @@
 # pelo token da empresa e pela chave privada de leitura (access key SSH).
 # A chave e apagada depois do clone.
 # Reexecutar nao apaga volume.
+#   --ignorar-requisitos  instala num PC abaixo do minimo (suporte, por conta e risco).
 set -euo pipefail
+
+IGNORAR_REQUISITOS=0
+for arg in "$@"; do
+  case "$arg" in
+    --ignorar-requisitos) IGNORAR_REQUISITOS=1 ;;
+    *) echo "Opcao desconhecida: $arg"; exit 1 ;;
+  esac
+done
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 INSTALL_DIR="${NCOMMERCE_INSTALL_DIR:-/opt/ncommerce}"
@@ -23,6 +32,41 @@ if [ ! -f "$ROOT/docker/docker-compose.yml" ]; then
   echo "Nao achei $ROOT/docker/docker-compose.yml."
   exit 1
 fi
+
+# Sem o Docker Desktop do Windows, MySQL, API e CUPS cabem em 4 GB. Ubuntu 20.04 e o mais
+# antigo com Docker Compose v2 nos pacotes da distro. Clock nao e exigido: um processador
+# com 4 threads dificilmente e lento demais.
+assert_minimum_hardware() {
+  local problems=() threads mem_kb version
+  if [ -r /etc/os-release ]; then
+    . /etc/os-release
+    version="${VERSION_ID:-0}"
+    if [ "${ID:-}" != "ubuntu" ] || [ "${version%%.*}" -lt 20 ]; then
+      problems+=("Ubuntu 20.04 ou mais novo (este e ${PRETTY_NAME:-desconhecido})")
+    fi
+  fi
+  threads="$(nproc 2>/dev/null || echo 0)"
+  if [ "$threads" -lt 4 ]; then
+    problems+=("processador com 4 threads (este tem $threads)")
+  fi
+  # Um PC de 4 GB informa ~3,7 GB no MemTotal por causa da memoria reservada ao kernel e ao video.
+  mem_kb="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+  if [ "$mem_kb" -lt 3500000 ]; then
+    problems+=("4 GB de RAM (este tem $(awk -v k="$mem_kb" 'BEGIN { printf "%.1f", k / 1048576 }') GB)")
+  fi
+  if [ "${#problems[@]}" -eq 0 ]; then
+    return 0
+  fi
+  echo "Este computador nao atende o minimo do NCommerce:"
+  printf '  - %s\n' "${problems[@]}"
+  if [ "$IGNORAR_REQUISITOS" = "1" ]; then
+    echo "Seguindo mesmo assim (--ignorar-requisitos)."
+    return 0
+  fi
+  echo "Use um computador com Ubuntu 20.04 ou mais novo, 4 threads e 4 GB de RAM."
+  exit 1
+}
+assert_minimum_hardware
 
 if ! command -v sudo >/dev/null 2>&1; then
   echo "Preciso do sudo."
