@@ -151,9 +151,21 @@ function Read-EnvValue([string]$Path, [string]$Key, [string]$Default) {
     return $Default
 }
 
+# Num Windows 10 recem-instalado o App Installer (winget) existe mas ainda nao foi registrado
+# para o usuario. Registra antes de desistir.
+function Initialize-Winget {
+    if (Get-Command winget -ErrorAction SilentlyContinue) { return $true }
+    try {
+        Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe -ErrorAction Stop | Out-Null
+    } catch {
+        return $false
+    }
+    return [bool](Get-Command winget -ErrorAction SilentlyContinue)
+}
+
 function Install-GitIfMissing {
     if (Get-Command git.exe -ErrorAction SilentlyContinue) { return }
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    if (-not (Initialize-Winget)) {
         Fail "Git nao esta instalado e o winget nao existe."
     }
     Write-Host "Instalando Git..."
@@ -368,12 +380,14 @@ rm -rf /tmp/ncommerce.zip /tmp/ncommerce-restore /tmp/ncommerce-restore.sh
 function Assert-MinimumHardware {
     $problems = @()
     $build = [int](Get-CimInstance Win32_OperatingSystem).BuildNumber
-    if ($build -lt 22000) { $problems += "Windows 11 (este e o build $build)" }
+    # 19045 e o Windows 10 22H2, o mais antigo que o Docker Desktop aceita.
+    if ($build -lt 19045) { $problems += "Windows 10 22H2 ou Windows 11 (este e o build $build)" }
     $threads = (Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
     if ($threads -lt 4) { $problems += "processador com 4 threads (este tem $threads)" }
-    # Um PC de 6 GB informa um pouco menos por causa da memoria reservada ao video.
+    # Um PC de 6 GB informa menos: o firmware e o video integrado reservam ate ~1 GB. 5 GB
+    # aceita esse PC e barra o de 4 GB, que informa no maximo 4.
     $ramGb = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 1)
-    if ($ramGb -lt 5.5) { $problems += "6 GB de RAM (este tem $ramGb GB)" }
+    if ($ramGb -lt 5.0) { $problems += "6 GB de RAM (este tem $ramGb GB)" }
     if ($problems.Count -eq 0) { return }
 
     Write-Host ""
@@ -383,7 +397,7 @@ function Assert-MinimumHardware {
         Write-Host "Seguindo mesmo assim (-IgnorarRequisitos)." -ForegroundColor Yellow
         return
     }
-    Fail "Use um computador com Windows 11, 4 threads e 6 GB de RAM."
+    Fail "Use um computador com Windows 10 22H2 ou Windows 11, 4 threads e 6 GB de RAM."
 }
 
 Assert-MinimumHardware
@@ -483,7 +497,7 @@ function Install-AnyDesk {
         Write-Host "AnyDesk ja instalado."
         return
     }
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    if (-not (Initialize-Winget)) {
         Write-Host "Sem winget. Instale o AnyDesk depois em https://anydesk.com."
         return
     }
@@ -541,7 +555,7 @@ if (-not (Get-Command curl.exe -CommandType Application -ErrorAction SilentlyCon
 
 # O Docker fica pronto antes de pedir o codigo: se ele travar, o codigo nao e gasto.
 if (-not (Test-Path $DockerExe)) {
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    if (-not (Initialize-Winget)) {
         Fail "Docker Desktop nao esta instalado e o winget nao existe. Instale o Docker Desktop e rode este arquivo de novo."
     }
     Write-Host "Instalando Docker Desktop. Isso pode levar varios minutos."

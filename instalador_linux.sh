@@ -49,9 +49,10 @@ assert_minimum_hardware() {
   if [ "$threads" -lt 4 ]; then
     problems+=("processador com 4 threads (este tem $threads)")
   fi
-  # Um PC de 4 GB informa ~3,7 GB no MemTotal por causa da memoria reservada ao kernel e ao video.
+  # Um PC de 4 GB informa menos no MemTotal: kernel, firmware e video integrado reservam ate
+  # ~1 GB. 3 GB (3145728 kB) aceita esse PC e barra o de 3 GB ou menos.
   mem_kb="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
-  if [ "$mem_kb" -lt 3500000 ]; then
+  if [ "$mem_kb" -lt 3145728 ]; then
     problems+=("4 GB de RAM (este tem $(awk -v k="$mem_kb" 'BEGIN { printf "%.1f", k / 1048576 }') GB)")
   fi
   if [ "${#problems[@]}" -eq 0 ]; then
