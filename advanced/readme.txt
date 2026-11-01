@@ -7,6 +7,8 @@ ncommerce.app/instalar.
 
 ESTA PASTA (advanced/)
   - instalador_nativo.sh: instala sem Docker num Ubuntu (rbenv, nginx, mysql etc.).
+    So tem suporte quando a equipe NCommerce autoriza explicitamente. Sera substituido
+    em breve pela instalacao Docker.
     Rode da raiz: ./advanced/instalador_nativo.sh
     Usa o mesmo codigo de instalacao do ncommerce_manager. A chave do tunel Nlabs e o
     ID do AnyDesk vao sozinhos para o manager, nada para colar no servidor.

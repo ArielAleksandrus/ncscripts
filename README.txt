@@ -120,3 +120,7 @@ Recomendado
 Uso do suporte. Tem o instalador sem Docker (instalador_nativo.sh), a
 instalacao nativa dentro do WSL do Windows e os scripts antigos (.old). Veja
 advanced/readme.txt.
+
+A instalacao nativa (sem Docker, inclusive no WSL) so tem suporte quando a
+equipe NCommerce autoriza explicitamente. Ela sera substituida em breve pela
+instalacao Docker.
