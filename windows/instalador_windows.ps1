@@ -631,6 +631,7 @@ Copy-Item $updateSrc (Join-Path $InstallDir "ncommerce-docker-update.bat") -Forc
 Copy-Item (Join-Path $Root "windows\refresh-host-ips.ps1") (Join-Path $InstallDir "refresh-host-ips.ps1") -Force
 Copy-Item (Join-Path $Root "windows\anydesk-id.ps1") (Join-Path $InstallDir "anydesk-id.ps1") -Force
 Copy-Item (Join-Path $Root "windows\usb-printers.ps1") (Join-Path $InstallDir "usb-printers.ps1") -Force
+Copy-Item (Join-Path $Root "windows\update-host.ps1") (Join-Path $InstallDir "update-host.ps1") -Force
 Copy-Item (Join-Path $Root "windows\drivers") $InstallDir -Recurse -Force
 
 $envFile = Join-Path $InstallDir ".env"
@@ -758,7 +759,7 @@ function New-UpdateShortcut {
     $shortcut.Arguments = '/c "' + (Join-Path $InstallDir "ncommerce-docker-update.bat") + ' & pause"'
     $shortcut.WorkingDirectory = $InstallDir
     $shortcut.WindowStyle = 1
-    $shortcut.Description = "Baixa a versao publicada e recria os containers"
+    $shortcut.Description = "Atualiza os scripts deste PC, baixa a versao publicada e recria os containers"
     $shortcut.Save()
     Write-Host "Atalho: $lnk"
 }

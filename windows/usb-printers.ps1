@@ -124,7 +124,20 @@ function Register-SyncTask {
         -Settings $settings -Principal $principal -Force | Out-Null
 }
 
+# Instalacoes antigas registraram a tarefa a cada 5 minutos. Rodando como SYSTEM, a
+# propria tarefa passa para o intervalo atual; o atalho "Atualizar NCommerce" so
+# troca este arquivo e nao precisa de admin.
+function Update-SyncTaskInterval {
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if (-not $task) { return }
+    $stale = @($task.Triggers | Where-Object { $_.Repetition.Interval -and $_.Repetition.Interval -ne "PT2M" })
+    if ($stale.Count -eq 0) { return }
+    foreach ($t in $stale) { $t.Repetition.Interval = "PT2M" }
+    Set-ScheduledTask -TaskName $TaskName -Trigger $task.Triggers | Out-Null
+}
+
 if ($Sincronizar) {
+    try { Update-SyncTaskInterval } catch { }
     try {
         Share-UsbPrinters | Out-Null
         Write-PrinterList
