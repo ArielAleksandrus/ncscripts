@@ -87,13 +87,18 @@ function Share-UsbPrinters {
 }
 
 # O CUPS do container le esta lista (backend winusb) e mostra cada impressora em
-# "Impressoras locais", com o driver ja escolhido. Uma linha por impressora:
-# compartilhamento<TAB>nome<TAB>driver.
+# "Impressoras locais", com o driver ja escolhido. O chat de suporte le o status
+# para dizer se a impressora USB esta desligada ou com o cabo solto. Uma linha por
+# impressora: compartilhamento<TAB>nome<TAB>driver<TAB>status<TAB>offline<TAB>hora.
 function Write-PrinterList {
     $hostDir = Join-Path $PSScriptRoot "host"
     New-Item -ItemType Directory -Force -Path $hostDir | Out-Null
+    $now = Get-Date -Format o
     $lines = @(Get-Printer | Where-Object { $_.PortName -like "USB*" -and $_.Shared } |
-        ForEach-Object { "$($_.ShareName)`t$($_.Name)`t$($_.DriverName)" })
+        ForEach-Object {
+            $wmi = Get-CimInstance Win32_Printer -Filter "Name='$($_.Name -replace "'", "''")'" -ErrorAction SilentlyContinue
+            "$($_.ShareName)`t$($_.Name)`t$($_.DriverName)`t$($_.PrinterStatus)`t$([bool]$wmi.WorkOffline)`t$now"
+        })
     $utf8 = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText((Join-Path $hostDir "usb_printers"), (($lines | ForEach-Object { "$_`n" }) -join ""), $utf8)
 }
@@ -109,12 +114,13 @@ function Register-SyncTask {
         New-CimInstance -ClientOnly
     $added.Enabled = $true
     $added.Subscription = '<QueryList><Query Id="0" Path="Microsoft-Windows-PrintService/Operational"><Select Path="Microsoft-Windows-PrintService/Operational">*[System[EventID=300]]</Select></Query></QueryList>'
-    $every5 = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)
+    # A cada 2 minutos: compartilha impressora nova e atualiza o status lido pelo chat.
+    $every2 = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 2)
     $boot = New-ScheduledTaskTrigger -AtStartup
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
         -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
     $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($added, $every5, $boot) `
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($added, $every2, $boot) `
         -Settings $settings -Principal $principal -Force | Out-Null
 }
 
