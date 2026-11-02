@@ -3,7 +3,7 @@
 # Instala o driver (opcional), liga o servico LPD, abre a 515 e compartilha as impressoras USB.
 # Rode como admin. Impressora plugada depois: a tarefa "NCommerce Impressoras USB" roda
 # este script com -Sincronizar (compartilha e atualiza a lista) quando o Windows cria uma
-# impressora, ao ligar o PC e a cada 5 minutos.
+# impressora, ao ligar o PC e a cada 2 minutos.
 # No CUPS do container: lpd://host.docker.internal/<compartilhamento>, com o PPD Elgin ou Bematech.
 # O CUPS manda os dados prontos para a impressora; o Windows so repassa.
 
