@@ -8,8 +8,11 @@
   Reexecutar nao apaga volume.
 
   -IgnorarRequisitos instala num PC abaixo do minimo (suporte, por conta e risco).
+  -Backup ARQUIVO.zip restaura este zip de backup em vez do backup do mestre.
+                     Sem a opcao, o instalador pergunta: arraste o zip para a
+                     janela ou tecle Enter para usar o do mestre.
 #>
-param([switch]$IgnorarRequisitos)
+param([switch]$IgnorarRequisitos, [string]$Backup = "")
 
 $ErrorActionPreference = "Stop"
 $InstallDir = "C:\NCommerce"
@@ -120,6 +123,163 @@ function Save-CompanyBackup([string]$Code) {
         Fail "Nao consegui baixar o backup (HTTP $http)."
     }
     Write-Host "Backup baixado em $dest."
+}
+
+# Caminho de um arquivo arrastado para a janela: o Windows cola entre aspas
+# quando tem espaco, e o PowerShell ISE cola com "& " na frente.
+function ConvertFrom-DroppedPath([string]$Raw) {
+    $p = $Raw.Trim()
+    if ($p.StartsWith("& ")) { $p = $p.Substring(2).Trim() }
+    if ($p.Length -ge 2 -and (($p[0] -eq '"' -and $p[-1] -eq '"') -or ($p[0] -eq "'" -and $p[-1] -eq "'"))) {
+        $p = $p.Substring(1, $p.Length - 2)
+    }
+    if ($p.StartsWith("file:///")) { $p = [System.Uri]::UnescapeDataString($p.Substring(8)) }
+    return $p
+}
+
+$script:Crc32Table = $null
+function Update-Crc32([uint32]$Crc, [byte]$B) {
+    if (-not $script:Crc32Table) {
+        $t = New-Object 'uint32[]' 256
+        for ($n = 0; $n -lt 256; $n++) {
+            [uint32]$c = $n
+            for ($k = 0; $k -lt 8; $k++) {
+                if ($c -band 1) { $c = [uint32]([uint32]3988292384 -bxor ($c -shr 1)) } else { $c = [uint32]($c -shr 1) }
+            }
+            $t[$n] = $c
+        }
+        $script:Crc32Table = $t
+    }
+    return [uint32]($script:Crc32Table[($Crc -bxor $B) -band 0xFF] -bxor ($Crc -shr 8))
+}
+
+# Confere a senha de uma entrada ZipCrypto (zip --password): os 12 bytes de
+# cabecalho cifrado terminam no byte alto do CRC (ou da hora, com o bit 3).
+# Uma entrada so deixa passar 1 senha errada em 256; o instalador confere todas,
+# e o unzip do container ainda confere o zip inteiro.
+function Test-ZipCryptoPassword([byte[]]$Header, [string]$Password, [byte]$Check) {
+    [uint32]$k0 = 0x12345678; [uint32]$k1 = 0x23456789; [uint32]$k2 = 0x34567890
+    $update = {
+        param([byte]$c)
+        $script:zk0 = Update-Crc32 $script:zk0 $c
+        $script:zk1 = [uint32]((([uint64]$script:zk1 + ($script:zk0 -band 0xFF)) * [uint64]134775813 + 1) -band [uint64]4294967295)
+        $script:zk2 = Update-Crc32 $script:zk2 ([byte](($script:zk1 -shr 24) -band 0xFF))
+    }
+    $script:zk0 = $k0; $script:zk1 = $k1; $script:zk2 = $k2
+    foreach ($ch in [System.Text.Encoding]::ASCII.GetBytes($Password)) { & $update $ch }
+    [byte]$last = 0
+    foreach ($b in $Header) {
+        [uint32]$temp = ($script:zk2 -bor 2) -band 0xFFFF
+        [byte]$plain = $b -bxor ((([uint64]$temp * [uint64]($temp -bxor 1)) -shr 8) -band 0xFF)
+        & $update $plain
+        $last = $plain
+    }
+    return ($last -eq $Check)
+}
+
+# Um zip de backup do NCommerce desta empresa: traz o backup.sql, criptografado
+# (o backup.sh grava com zip --password) e com a senha dos 6 primeiros
+# caracteres do token. Devolve o motivo quando nao serve; vazio quando serve.
+function Get-BackupZipProblem([string]$Zip, [string]$Token) {
+    if (-not (Test-Path -LiteralPath $Zip -PathType Leaf)) { return "Nao achei o arquivo $Zip." }
+    $fs = $null
+    try {
+        $fs = [System.IO.File]::OpenRead($Zip)
+        $br = New-Object System.IO.BinaryReader($fs)
+        $tail = [int][Math]::Min($fs.Length, 65557)
+        if ($tail -lt 22) { return "$Zip nao e um arquivo zip." }
+        $fs.Seek(-$tail, [System.IO.SeekOrigin]::End) | Out-Null
+        $buf = $br.ReadBytes($tail)
+        $eocd = -1
+        for ($i = $buf.Length - 22; $i -ge 0; $i--) {
+            if ($buf[$i] -eq 0x50 -and $buf[$i + 1] -eq 0x4B -and $buf[$i + 2] -eq 0x05 -and $buf[$i + 3] -eq 0x06) { $eocd = $i; break }
+        }
+        if ($eocd -lt 0) { return "$Zip nao e um arquivo zip." }
+        $entries = [BitConverter]::ToUInt16($buf, $eocd + 10)
+        $cdOffset = [BitConverter]::ToUInt32($buf, $eocd + 16)
+        $fs.Seek($cdOffset, [System.IO.SeekOrigin]::Begin) | Out-Null
+        $found = $null
+        $encrypted = @()
+        for ($e = 0; $e -lt $entries; $e++) {
+            $h = $br.ReadBytes(46)
+            if ($h.Length -lt 46 -or [BitConverter]::ToUInt32($h, 0) -ne 0x02014b50) { return "$Zip esta corrompido." }
+            $nameLen = [BitConverter]::ToUInt16($h, 28)
+            $skip = [BitConverter]::ToUInt16($h, 30) + [BitConverter]::ToUInt16($h, 32)
+            $name = [System.Text.Encoding]::UTF8.GetString($br.ReadBytes($nameLen))
+            $fs.Seek($skip, [System.IO.SeekOrigin]::Current) | Out-Null
+            $entry = @{
+                Flags = [BitConverter]::ToUInt16($h, 8)
+                Time = [BitConverter]::ToUInt16($h, 12)
+                Crc = [BitConverter]::ToUInt32($h, 16)
+                Offset = [BitConverter]::ToUInt32($h, 42)
+            }
+            if ($name -eq "backup.sql") { $found = $entry }
+            if ($entry.Flags -band 1) { $encrypted += $entry }
+        }
+        if (-not $found) { return "$Zip nao e um backup do NCommerce: falta o backup.sql." }
+        if (($found.Flags -band 1) -eq 0) { return "$Zip nao esta criptografado. Backup do NCommerce sempre vem com senha." }
+        if ($Token.Length -lt 6) { return "Token curto demais para conferir o backup." }
+        # Cada entrada cifrada confere 1 byte: juntas, uma senha errada quase nunca passa.
+        foreach ($entry in $encrypted) {
+            $fs.Seek($entry.Offset, [System.IO.SeekOrigin]::Begin) | Out-Null
+            $lh = $br.ReadBytes(30)
+            if ($lh.Length -lt 30 -or [BitConverter]::ToUInt32($lh, 0) -ne 0x04034b50) { return "$Zip esta corrompido." }
+            $fs.Seek([BitConverter]::ToUInt16($lh, 26) + [BitConverter]::ToUInt16($lh, 28), [System.IO.SeekOrigin]::Current) | Out-Null
+            $encHeader = $br.ReadBytes(12)
+            if ($entry.Flags -band 8) { [byte]$check = ($entry.Time -shr 8) -band 0xFF } else { [byte]$check = ($entry.Crc -shr 24) -band 0xFF }
+            if (-not (Test-ZipCryptoPassword $encHeader $Token.Substring(0, 6) $check)) {
+                return "$Zip nao abre com o token desta empresa: e backup de outra empresa ou esta corrompido."
+            }
+        }
+        return ""
+    } catch {
+        return "Nao consegui ler ${Zip}: $($_.Exception.Message)"
+    } finally {
+        if ($fs) { $fs.Dispose() }
+    }
+}
+
+# Backup que a instalacao restaura: o zip de -Backup, um zip arrastado para a
+# janela ou, sem nenhum, o do mestre (devolve vazio).
+function Select-BackupZip([string]$Token) {
+    if ($Backup) {
+        $path = ConvertFrom-DroppedPath $Backup
+        $problem = Get-BackupZipProblem $path $Token
+        if ($problem) { Fail $problem }
+        $full = (Resolve-Path -LiteralPath $path).Path
+        Write-Host "Backup avulso valido: $full."
+        return $full
+    }
+    Write-Host ""
+    Write-Host "Backup: para restaurar um zip de backup avulso, arraste o arquivo para esta janela e tecle Enter."
+    Write-Host "Para usar o backup guardado no servidor, so tecle Enter."
+    while ($true) {
+        $path = ConvertFrom-DroppedPath (Read-Host "Zip de backup (Enter = servidor)")
+        if (-not $path) {
+            Write-Host "Usando o backup do servidor."
+            return ""
+        }
+        $problem = Get-BackupZipProblem $path $Token
+        if (-not $problem) {
+            $full = (Resolve-Path -LiteralPath $path).Path
+            Write-Host "Backup avulso valido: $full."
+            return $full
+        }
+        Write-Host $problem
+        Write-Host "Arraste outro zip, ou tecle Enter para usar o backup do servidor."
+    }
+}
+
+# Um zip avulso entra no lugar do backup do mestre. Escolhido de proposito,
+# ele e restaurado mesmo num PC que ja restaurou um backup antes.
+function Use-BackupZip([string]$Zip) {
+    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+    $dest = Join-Path $InstallDir "ncommerce.zip"
+    if ([System.IO.Path]::GetFullPath($Zip) -ne [System.IO.Path]::GetFullPath($dest)) {
+        Copy-Item -LiteralPath $Zip -Destination $dest -Force
+    }
+    Remove-Item (Join-Path $InstallDir ".backup-restored") -Force -ErrorAction SilentlyContinue
+    Write-Host "Backup avulso copiado para $dest."
 }
 
 function Test-DockerReady {
@@ -519,6 +679,7 @@ Set-AnyDeskPassword ([string]$grant.anydesk_password)
 $grant.PSObject.Properties.Remove("anydesk_password")
 $ncommerceToken = [string]$grant.token
 $grant.PSObject.Properties.Remove("git_private_key")
+$backupZip = Select-BackupZip $ncommerceToken
 
 $cupsPort = 631
 $listen = Get-NetTCPConnection -LocalPort 631 -State Listen -ErrorAction SilentlyContinue
@@ -620,7 +781,11 @@ if (Test-TokenOnVolume) {
     }
 }
 
-Save-CompanyBackup $installCode
+if ($backupZip) {
+    Use-BackupZip $backupZip
+} else {
+    Save-CompanyBackup $installCode
+}
 Restore-CompanyBackup $ncommerceToken
 
 if (-not $skipTokenPost) {
