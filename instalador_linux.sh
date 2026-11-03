@@ -446,11 +446,12 @@ set_anydesk_password() {
   if [ -z "${ANYDESK_PASSWORD:-}" ] || ! command -v anydesk >/dev/null 2>&1; then
     return 0
   fi
+  local out
   sudo -v
-  if printf '%s' "$ANYDESK_PASSWORD" | sudo anydesk --set-password >/dev/null 2>&1; then
+  if out="$(printf '%s' "$ANYDESK_PASSWORD" | sudo anydesk --set-password 2>&1)"; then
     echo "Acesso nao supervisionado do AnyDesk configurado."
   else
-    echo "Nao consegui configurar a senha do AnyDesk."
+    echo "Nao consegui configurar a senha do AnyDesk (saida $?): ${out:-sem mensagem}"
   fi
 }
 
@@ -493,7 +494,7 @@ unset ANYDESK_PASSWORD
 clone_repos
 cleanup_secrets
 
-if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+if ! command -v docker >/dev/null 2>&1 || ! sudo docker compose version >/dev/null 2>&1; then
   echo "Instalando Docker Engine..."
   if command -v apt-get >/dev/null 2>&1; then
     sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get update
@@ -502,12 +503,12 @@ if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>
   fi
 fi
 
-if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+if ! command -v docker >/dev/null 2>&1 || ! sudo docker compose version >/dev/null 2>&1; then
   echo "O pacote da distro nao trouxe o Docker Compose. Usando https://get.docker.com ..."
   curl -fsSL https://get.docker.com | sudo sh
 fi
 
-if ! docker compose version >/dev/null 2>&1; then
+if ! sudo docker compose version >/dev/null 2>&1; then
   echo "Docker Compose nao ficou disponivel. Confira a instalacao e rode de novo."
   exit 1
 fi
