@@ -403,8 +403,10 @@ if [ -f nfce.zip ]; then unzip -o nfce.zip -d /tmp/ncommerce-restore >/dev/null;
 mysql -h mysql -uroot -pncommerce_root -e "CREATE DATABASE IF NOT EXISTS ncommerce_api_production CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 mysql -h mysql -uroot -pncommerce_root ncommerce_api_production < backup.sql
 if [ -d business_docs ]; then cp -a business_docs /app/ncommerce_api/; fi
-if [ -d essentials ]; then cp -a essentials /data/nfce/; fi
-if [ -d notas_output ]; then cp -a notas_output /data/nfce/; fi
+# backup/ guarda os XML dos meses anteriores, que o relatorio de impostos le.
+for part in essentials notas_output backup notas_compra notas_input notas_log; do
+  if [ -d "$part" ]; then cp -a "$part" /data/nfce/; fi
+done
 # Impressoras, drivers (.ppd) e filtros. Imagem antiga sem o restaurador: so o printers.conf.
 if command -v ncommerce-restore-cups >/dev/null 2>&1; then
   ncommerce-restore-cups /tmp/ncommerce-restore || echo "Nao restaurei todas as impressoras. Configure as que faltarem na web do CUPS."

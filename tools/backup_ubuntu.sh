@@ -118,7 +118,9 @@ fi
 
 echo "Juntando os arquivos da NFC-e..."
 nfce_parts=()
-for part in essentials notas_output backup; do
+# backup/ tem os XML dos meses anteriores (relatorio de impostos) e as compras
+# arquivadas. notas_compra tem as compras recentes e o NSU da consulta na SEFAZ.
+for part in essentials notas_output backup notas_compra notas_input notas_log; do
   if [ -e "$NFCE_DIST/$part" ]; then nfce_parts+=("$part"); fi
 done
 if [ "${#nfce_parts[@]}" -gt 0 ]; then

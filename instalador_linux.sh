@@ -465,12 +465,12 @@ restore_backup_into_docker() {
   if [ -f "$work/nfce.zip" ]; then
     unzip -o "$work/nfce.zip" -d "$work" >/dev/null
   fi
-  if [ -d "$work/essentials" ]; then
-    sudo docker compose cp "$work/essentials" api:/data/nfce/ || true
-  fi
-  if [ -d "$work/notas_output" ]; then
-    sudo docker compose cp "$work/notas_output" api:/data/nfce/ || true
-  fi
+  # backup/ guarda os XML dos meses anteriores, que o relatorio de impostos le.
+  for part in essentials notas_output backup notas_compra notas_input notas_log; do
+    if [ -d "$work/$part" ]; then
+      sudo docker compose cp "$work/$part" api:/data/nfce/ || true
+    fi
+  done
   restore_printers "$work"
   rm -rf "$work"
   sudo touch "$marker"
