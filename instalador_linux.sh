@@ -357,58 +357,29 @@ use_backup_zip() {
 # Instalacao nativa antiga nesta maquina (nginx + Passenger em ~/NCommerce).
 # Tirar so os sites do nginx nao basta: o Sidekiq e o tunel SSH nativos sao
 # processos soltos e continuariam buscando pedidos do iFood, falando com o
-# mestre com o mesmo token e segurando as portas do tunel. O cron de backup
-# nativo tambem sai. O MySQL nativo fica, com os dados (o do container nao usa
-# a porta 3306 do PC).
-NATIVE_SIDEKIQ_PATTERN='^sidekiq [0-9]'
-NATIVE_TUNNEL_PATTERN='^ssh .*-R .*tunnel[.]nlabs[.]live'
-# Processos do usuario fora de container (os do Docker ficam num cgroup docker).
-native_pids() {
-  local pid
-  for pid in $(pgrep -u "$USER" -f "$1" 2>/dev/null || true); do
-    if ! grep -qE 'docker|containerd' "/proc/$pid/cgroup" 2>/dev/null; then
-      echo "$pid"
-    fi
+# mestre com o mesmo token e segurando as portas do tunel. Quem desliga e o
+# tools/desligar_nativo.sh, que anota tudo para o tools/religar_nativo.sh
+# voltar a loja nativa se a migracao der errado.
+native_install_present() {
+  local site pid
+  for site in ncommerce ncommerce-api; do
+    if [ -e "/etc/nginx/sites-enabled/$site" ]; then return 0; fi
   done
-}
-stop_native_pids() {
-  local pids
-  pids="$(native_pids "$1")"
-  [ -n "$pids" ] || return 1
-  # shellcheck disable=SC2086
-  kill $pids 2>/dev/null || true
+  for pid in $(pgrep -f '^sidekiq [0-9]|^ssh .*-R .*tunnel[.]nlabs[.]live' 2>/dev/null || true); do
+    if ! grep -qE 'docker|containerd' "/proc/$pid/cgroup" 2>/dev/null; then return 0; fi
+  done
+  if crontab -l 2>/dev/null | grep -qiE 'ncommerce|nfce'; then return 0; fi
+  if sudo crontab -l 2>/dev/null | grep -qiE 'ncommerce|nfce'; then return 0; fi
+  return 1
 }
 stop_native_install() {
-  local found=0 site
-  for site in ncommerce ncommerce-api; do
-    if [ -e "/etc/nginx/sites-enabled/$site" ]; then found=1; fi
-  done
-  if [ -n "$(native_pids "$NATIVE_SIDEKIQ_PATTERN")" ]; then found=1; fi
-  if [ -n "$(native_pids "$NATIVE_TUNNEL_PATTERN")" ]; then found=1; fi
-  if crontab -l 2>/dev/null | grep -q 'ncommerce_api/vendor/scripts'; then found=1; fi
-  [ "$found" -eq 1 ] || return 0
-
-  echo "Achei uma instalacao nativa do NCommerce. Desligando para o Docker assumir:"
-  for site in ncommerce ncommerce-api; do
-    if [ -e "/etc/nginx/sites-enabled/$site" ]; then
-      sudo rm -f "/etc/nginx/sites-enabled/$site"
-      echo "  - site $site tirado do nginx"
-    fi
-  done
-  if command -v nginx >/dev/null 2>&1; then
-    sudo systemctl restart nginx 2>/dev/null || sudo service nginx restart 2>/dev/null || true
+  native_install_present || return 0
+  echo "Achei uma instalacao nativa do NCommerce. Desligando para o Docker assumir"
+  echo "(para voltar a loja nativa: tools/religar_nativo.sh):"
+  if ! bash "$ROOT/tools/desligar_nativo.sh"; then
+    echo "Nao consegui desligar a instalacao nativa. Confira o que ficou no ar e rode de novo."
+    exit 1
   fi
-  if stop_native_pids "$NATIVE_SIDEKIQ_PATTERN"; then
-    echo "  - Sidekiq nativo parado"
-  fi
-  if stop_native_pids "$NATIVE_TUNNEL_PATTERN"; then
-    echo "  - tunel nativo fechado"
-  fi
-  if crontab -l 2>/dev/null | grep -q 'ncommerce_api/vendor/scripts'; then
-    crontab -l 2>/dev/null | grep -v 'ncommerce_api/vendor/scripts' | crontab - || true
-    echo "  - backup nativo tirado do cron"
-  fi
-  sleep 2
 }
 
 # 200 grava o zip. 204 significa empresa sem backup. Outro HTTP aborta.
