@@ -16,6 +16,10 @@ if [ ! -f "$INSTALL_DIR/docker-compose.yml" ]; then
 fi
 
 cd "$INSTALL_DIR"
+# Instaladores antigos clonavam o codigo-fonte em src/. Nada usa essa pasta.
+if [ -d "$INSTALL_DIR/src" ]; then
+  sudo rm -rf "$INSTALL_DIR/src"
+fi
 if [ -f "$INSTALL_DIR/host-ips.sh" ]; then
   # shellcheck disable=SC1091
   . "$INSTALL_DIR/host-ips.sh"

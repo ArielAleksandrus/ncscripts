@@ -3,8 +3,7 @@
 # Nao use sudo neste arquivo. Ele chama sudo so onde precisa.
 # Usa o codigo de 8 caracteres do codigo-instalacao.txt (zip de ncommerce.app/instalar)
 # ou pede para digitar. O mestre troca esse codigo, uma vez,
-# pelo token da empresa e pela chave privada de leitura (access key SSH).
-# A chave e apagada depois do clone.
+# pelo token da empresa. A maquina recebe so as imagens do registry, sem codigo-fonte.
 # Reexecutar nao apaga volume.
 #   --ignorar-requisitos  instala num PC abaixo do minimo (suporte, por conta e risco).
 set -euo pipefail
@@ -77,7 +76,7 @@ sudo -v
 
 ensure_base_packages() {
   local missing=() cmd
-  for cmd in curl python3 git ssh unzip ss hostname; do
+  for cmd in curl python3 ssh unzip ss hostname; do
     command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
   done
   if [ "${#missing[@]}" -eq 0 ]; then
@@ -87,10 +86,10 @@ ensure_base_packages() {
     echo "Faltam comandos: ${missing[*]}. Instale e rode de novo."
     exit 1
   fi
-  echo "Instalando curl, python3, git, ssh, unzip e ss..."
+  echo "Instalando curl, python3, ssh, unzip e ss..."
   sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get update
   sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y \
-    curl python3 ca-certificates git openssh-client unzip iproute2 hostname
+    curl python3 ca-certificates openssh-client unzip iproute2 hostname
 }
 
 ensure_base_packages
@@ -223,31 +222,21 @@ redeem() {
     rm -f "$body"
     return 1
   fi
-  KEY_FILE="$(mktemp)"
-  chmod 600 "$KEY_FILE"
-  grant="$(python3 - "$body" "$KEY_FILE" <<'PY'
+  grant="$(python3 - "$body" <<'PY'
 import json, sys
-body_path, key_path = sys.argv[1], sys.argv[2]
-d = json.load(open(body_path))
+d = json.load(open(sys.argv[1]))
 token = d.get("token") or d.get("ncommerce_token") or ""
-key = d.get("git_private_key") or ""
 company = d.get("company") or ""
 registry = d.get("registry") or ""
 anydesk_password = d.get("anydesk_password") or ""
 if not isinstance(token, str):
     token = ""
-if not isinstance(key, str):
-    key = ""
 if not isinstance(company, str):
     company = ""
 if not isinstance(registry, str):
     registry = ""
 if not isinstance(anydesk_password, str) or "\n" in anydesk_password:
     anydesk_password = ""
-key = key.replace("\r\n", "\n").replace("\r", "\n")
-if key and not key.endswith("\n"):
-    key += "\n"
-open(key_path, "w").write(key)
 sys.stdout.write("%s\n%s\n%s\n%s" % (token, company, registry, anydesk_password))
 PY
 )"
@@ -256,13 +245,11 @@ PY
   COMPANY_NAME="$(printf '%s\n' "$grant" | sed -n '2p')"
   REGISTRY_FROM_MASTER="$(printf '%s\n' "$grant" | sed -n '3p')"
   ANYDESK_PASSWORD="$(printf '%s\n' "$grant" | sed -n '4p')"
-  if [ -z "${NCOMMERCE_TOKEN}" ] || ! grep -q "PRIVATE KEY" "$KEY_FILE"; then
-    rm -f "$KEY_FILE"
-    echo "A resposta do mestre nao trouxe o token do ncommerce e a chave de leitura."
+  if [ -z "${NCOMMERCE_TOKEN}" ]; then
+    echo "A resposta do mestre nao trouxe o token do ncommerce."
     exit 1
   fi
   if [ -z "${COMPANY_NAME}" ]; then
-    rm -f "$KEY_FILE"
     echo "A resposta do mestre nao trouxe o nome da empresa para entrar no registry."
     exit 1
   fi
@@ -380,50 +367,6 @@ api_setup() {
     "http://127.0.0.1:3000/api/v1/docker_setup" 2>/dev/null || true
 }
 
-cleanup_secrets() {
-  unset GIT_SSH_COMMAND || true
-  if [ -n "${KEY_FILE:-}" ] && [ -f "$KEY_FILE" ]; then
-    shred -u "$KEY_FILE" 2>/dev/null || rm -f "$KEY_FILE"
-  fi
-  if [ -n "${KNOWN_HOSTS:-}" ] && [ -f "$KNOWN_HOSTS" ]; then
-    rm -f "$KNOWN_HOSTS"
-  fi
-}
-trap cleanup_secrets EXIT
-
-clone_repos() {
-  local repo dest
-  if ! command -v git >/dev/null 2>&1 || ! command -v ssh >/dev/null 2>&1; then
-    sudo apt-get update
-    sudo apt-get install -y git openssh-client
-  fi
-  sudo mkdir -p "$INSTALL_DIR/src"
-  sudo chown "$USER:$USER" "$INSTALL_DIR" "$INSTALL_DIR/src"
-  KNOWN_HOSTS="$(mktemp)"
-  chmod 600 "$KNOWN_HOSTS"
-  ssh-keyscan -T 10 -t ed25519,rsa bitbucket.org > "$KNOWN_HOSTS" 2>/dev/null || true
-  if ! grep -q bitbucket.org "$KNOWN_HOSTS"; then
-    echo "Nao consegui obter a chave do servidor bitbucket.org."
-    exit 1
-  fi
-  export GIT_SSH_COMMAND="ssh -i ${KEY_FILE} -o IdentitiesOnly=yes -o UserKnownHostsFile=${KNOWN_HOSTS} -o StrictHostKeyChecking=yes"
-  for repo in ncommerce_api ncommerce nfce; do
-    dest="$INSTALL_DIR/src/$repo"
-    if [ -d "$dest/.git" ]; then
-      echo "$repo ja esta em $dest"
-      continue
-    fi
-    rm -rf "$dest"
-    echo "Clonando $repo..."
-    if ! git clone --quiet "git@bitbucket.org:Aleksandrus/${repo}.git" "$dest"; then
-      rm -rf "$dest"
-      echo "Nao consegui clonar $repo. A chave de leitura do Bitbucket foi recusada."
-      exit 1
-    fi
-  done
-  unset GIT_SSH_COMMAND
-}
-
 port_busy() {
   local port="$1"
   if command -v ss >/dev/null 2>&1; then
@@ -491,8 +434,11 @@ if [ -z "$CODE" ] || ! redeem "$CODE"; then
 fi
 set_anydesk_password
 unset ANYDESK_PASSWORD
-clone_repos
-cleanup_secrets
+# Instaladores antigos clonavam o codigo-fonte em src/. A stack roda das
+# imagens e nada usa essa pasta.
+if [ -d "$INSTALL_DIR/src" ]; then
+  sudo rm -rf "$INSTALL_DIR/src"
+fi
 
 if ! command -v docker >/dev/null 2>&1 || ! sudo docker compose version >/dev/null 2>&1; then
   echo "Instalando Docker Engine..."
@@ -717,5 +663,4 @@ echo "  Site:  http://${ip_addr}:4200"
 echo "  API:   http://${ip_addr}:3000"
 echo "  CUPS:  http://127.0.0.1:${CUPS_PORT}"
 echo "  SSH:   ${USER}@${ip_addr} porta 22"
-echo "Codigo-fonte em ${INSTALL_DIR}/src (ncommerce_api, ncommerce, nfce)."
 echo "Atualizar: atalho Atualizar NCommerce na area de trabalho."

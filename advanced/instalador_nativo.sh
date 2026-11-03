@@ -31,6 +31,8 @@ case "${ID:-}:$UBUNTU_VERSION" in
     ;;
 esac
 
+# apply_release.sh fica ao lado deste arquivo.
+NATIVE_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 PROGRESS_DIR="$HOME/.ncommerce-progress"
 mkdir -p "$PROGRESS_DIR"
 
@@ -70,12 +72,13 @@ enable_ssh
 trap 'kill $KEEP_ALIVE_PID 2>/dev/null || true' EXIT
 
 # ====================== DADOS ======================
-# O tecnico digita o codigo de 8 caracteres. O mestre devolve o token e a
-# access key do Bitbucket. O token fica neste arquivo para o passo 7 e para
-# uma instalacao retomada.
+# O tecnico digita o codigo de 8 caracteres. O mestre devolve o token, que fica
+# neste arquivo para os passos 4 e 7 e para uma instalacao retomada. O PASSO 4
+# baixa o pacote ncommerce/native do registry com esse token: sem codigo-fonte.
 INSTALL_CODE_FILE="$PROGRESS_DIR/install-code"
 TOKEN_FILE="$PROGRESS_DIR/token"
 MACHINE_FILE="$PROGRESS_DIR/machine-id"
+# Chave do Bitbucket de instaladores antigos. Nao e mais usada; e apagada se existir.
 KEY_FILE="$PROGRESS_DIR/git-read-key"
 # Senha do acesso nao supervisionado do AnyDesk, igual em todas as lojas. Vem no resgate do
 # codigo e e apagada assim que o AnyDesk e instalado.
@@ -124,7 +127,7 @@ fi
 echo "Usuário Linux: $LINUX_USER"
 
 redeem_install_code() {
-  if [ -s "$TOKEN_FILE" ] && { is_step_done 4 || [ -s "$KEY_FILE" ]; }; then
+  if [ -s "$TOKEN_FILE" ]; then
     TOKEN="$(tr -d '[:space:]' < "$TOKEN_FILE")"
     return 0
   fi
@@ -145,9 +148,9 @@ redeem_install_code() {
     chmod 600 "$MACHINE_FILE"
   fi
   # Codigo recusado (expirado, usado em outro PC, digitado errado): pede outro em vez de sair.
-  until python3 - "$MASTER_URL" "$INSTALL_CODE_FILE" "$MACHINE_FILE" "$TOKEN_FILE" "$KEY_FILE" "$ANYDESK_PASSWORD_FILE" <<'PY'
+  until python3 - "$MASTER_URL" "$INSTALL_CODE_FILE" "$MACHINE_FILE" "$TOKEN_FILE" "$ANYDESK_PASSWORD_FILE" <<'PY'
 import json, os, socket, sys, urllib.error, urllib.request
-master, code_path, machine_path, token_path, key_path, anydesk_path = sys.argv[1:]
+master, code_path, machine_path, token_path, anydesk_path = sys.argv[1:]
 code = open(code_path).read().strip()
 machine = open(machine_path).read().strip()
 host = "".join(ch for ch in socket.gethostname() if ch.isalnum() or ch in ".-")[:100]
@@ -173,19 +176,12 @@ except Exception:
     sys.stderr.write("Resposta do mestre nao e JSON.\n")
     sys.exit(1)
 token = data.get("token") or data.get("ncommerce_token") or ""
-key = data.get("git_private_key") or ""
 if not isinstance(token, str):
     token = ""
-if not isinstance(key, str):
-    key = ""
-key = key.replace("\r\n", "\n").replace("\r", "\n")
-if key and not key.endswith("\n"):
-    key += "\n"
-if not token or "PRIVATE KEY" not in key:
-    sys.stderr.write("A resposta do mestre nao trouxe o token e a chave de leitura.\n")
+if not token:
+    sys.stderr.write("A resposta do mestre nao trouxe o token.\n")
     sys.exit(1)
 open(token_path, "w").write(token + "\n")
-open(key_path, "w").write(key)
 anydesk = data.get("anydesk_password")
 if isinstance(anydesk, str) and anydesk.strip():
     fd = os.open(anydesk_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -196,10 +192,7 @@ PY
     echo "Peca um codigo novo ao suporte (ncommerce_manager, pagina da empresa, Novo codigo) e digite abaixo."
     read_install_code
   done
-  chmod 600 "$TOKEN_FILE" "$KEY_FILE"
-  if is_step_done 4; then
-    shred -u "$KEY_FILE" 2>/dev/null || rm -f "$KEY_FILE"
-  fi
+  chmod 600 "$TOKEN_FILE"
   TOKEN="$(tr -d '[:space:]' < "$TOKEN_FILE")"
 }
 
@@ -394,35 +387,19 @@ fi
 if is_step_done 4; then
   echo "PASSO 4/7 já concluído anteriormente. Pulando..."
 else
-  echo "PASSO 4/7: Clonando repositórios (pula se já existir)"
-  cd ~ && mkdir -p NCommerce && cd NCommerce
-
-  # Evita a pergunta "Are you sure you want to continue connecting?" no primeiro clone
-  mkdir -p ~/.ssh
-  if ! ssh-keygen -F bitbucket.org >/dev/null 2>&1; then
-    ssh-keyscan -H bitbucket.org >> ~/.ssh/known_hosts 2>/dev/null
-  fi
-
-  if [ ! -s "$KEY_FILE" ]; then
-    echo "❌ Chave de leitura do Bitbucket ausente. Rode de novo com o codigo de instalacao."
+  echo "PASSO 4/7: Baixando o NCommerce"
+  mkdir -p ~/NCommerce
+  # Pacote do registry (ncommerce/native), sem codigo-fonte nem historico. Uma
+  # instalacao antiga, com clones, e convertida: os fontes e o .git saem.
+  if ! NCOMMERCE_TOKEN="$TOKEN" bash "$NATIVE_DIR/apply_release.sh" ~/NCommerce; then
+    echo ""
+    echo "❌ Não consegui baixar o NCommerce do registry. Confira a internet."
+    echo "Depois rode ./advanced/instalador_nativo.sh de novo (ele continua deste passo)."
     exit 1
   fi
-  export GIT_SSH_COMMAND="ssh -i ${KEY_FILE} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
-  for repo in ncommerce_api ncommerce sefaz-chrome-extension nfce; do
-    if [ ! -d "$repo/.git" ]; then
-      echo "Clonando $repo..."
-      if ! git clone "git@bitbucket.org:Aleksandrus/$repo.git"; then
-        echo ""
-        echo "❌ Não consegui clonar $repo. A access key de leitura do Bitbucket foi recusada."
-        echo "Depois rode ./advanced/instalador_nativo.sh de novo (ele continua deste passo)."
-        exit 1
-      fi
-    else
-      echo "✅ $repo já existe. Pulando clone."
-    fi
-  done
-  unset GIT_SSH_COMMAND
-  shred -u "$KEY_FILE" 2>/dev/null || rm -f "$KEY_FILE"
+  if [ -f "$KEY_FILE" ]; then
+    shred -u "$KEY_FILE" 2>/dev/null || rm -f "$KEY_FILE"
+  fi
 
   mark_step_done 4
 fi

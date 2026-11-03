@@ -10,6 +10,18 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 $ZipUrl = "https://github.com/ArielAleksandrus/ncscripts/archive/refs/heads/master.zip"
 
+# Instaladores antigos clonavam o codigo-fonte em C:\NCommerce\src. A stack roda
+# das imagens e nada usa essa pasta: sai daqui, com o historico do git.
+$oldSrc = Join-Path $InstallDir "src"
+if (Test-Path $oldSrc) {
+    Remove-Item $oldSrc -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path $oldSrc) {
+        Write-Host "Nao consegui apagar $oldSrc por inteiro."
+    } else {
+        Write-Host "Codigo-fonte antigo apagado de $oldSrc."
+    }
+}
+
 $work = Join-Path $env:TEMP ("ncscripts-" + [guid]::NewGuid().ToString("N"))
 try {
     New-Item -ItemType Directory -Force -Path $work | Out-Null

@@ -4,8 +4,7 @@
 
   Usa o codigo de 8 caracteres do codigo-instalacao.txt, que vem no zip
   de ncommerce.app/instalar, ou pede para digitar. O mestre troca esse codigo, uma vez,
-  pelo token da empresa e pela chave privada de leitura (access key SSH).
-  A chave e apagada depois do clone.
+  pelo token da empresa. O PC recebe so as imagens do registry, sem codigo-fonte.
   Reexecutar nao apaga volume.
 
   -IgnorarRequisitos instala num PC abaixo do minimo (suporte, por conta e risco).
@@ -26,7 +25,6 @@ $DockerDesktop = Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 
 function Fail($msg) {
-    Remove-Secrets
     Write-Host ""
     Write-Host "ERRO: $msg" -ForegroundColor Red
     Read-Host "Pressione Enter para sair"
@@ -97,8 +95,8 @@ function Get-InstallGrant([string]$Code, [switch]$Soft) {
     }
     Remove-Item $bodyFile.FullName -Force
     if (-not $grant.token) { $grant | Add-Member -NotePropertyName token -NotePropertyValue $grant.ncommerce_token -Force }
-    if (-not $grant.token -or -not $grant.git_private_key) {
-        Fail "A resposta do mestre nao trouxe o token do ncommerce e a chave de leitura."
+    if (-not $grant.token) {
+        Fail "A resposta do mestre nao trouxe o token do ncommerce."
     }
     return $grant
 }
@@ -122,18 +120,6 @@ function Save-CompanyBackup([string]$Code) {
         Fail "Nao consegui baixar o backup (HTTP $http)."
     }
     Write-Host "Backup baixado em $dest."
-}
-
-$script:SecretFiles = @()
-
-function Remove-Secrets {
-    foreach ($f in $script:SecretFiles) {
-        if ($f -and (Test-Path $f)) {
-            Remove-Item $f -Force -ErrorAction SilentlyContinue
-        }
-    }
-    $script:SecretFiles = @()
-    Remove-Item Env:GIT_SSH_COMMAND -ErrorAction SilentlyContinue
 }
 
 function Test-DockerReady {
@@ -161,86 +147,6 @@ function Initialize-Winget {
         return $false
     }
     return [bool](Get-Command winget -ErrorAction SilentlyContinue)
-}
-
-function Install-GitIfMissing {
-    if (Get-Command git.exe -ErrorAction SilentlyContinue) { return }
-    if (-not (Initialize-Winget)) {
-        Fail "Git nao esta instalado e o winget nao existe."
-    }
-    Write-Host "Instalando Git..."
-    & winget install --source winget --exact --id Git.Git --accept-package-agreements --accept-source-agreements --disable-interactivity
-    $machine = [Environment]::GetEnvironmentVariable("Path", "Machine")
-    $user = [Environment]::GetEnvironmentVariable("Path", "User")
-    $env:Path = "$machine;$user"
-    if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) {
-        Fail "Git nao ficou no PATH. Feche a janela e rode o instalador de novo."
-    }
-}
-
-function Find-Ssh {
-    $candidates = @(
-        (Join-Path $env:ProgramFiles "Git\usr\bin\ssh.exe"),
-        (Join-Path $env:WINDIR "System32\OpenSSH\ssh.exe")
-    )
-    foreach ($candidate in $candidates) {
-        if (Test-Path $candidate) { return $candidate }
-    }
-    $cmd = Get-Command ssh.exe -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
-    return $null
-}
-
-function Clone-Repos([string]$GitKey) {
-    Install-GitIfMissing
-    $ssh = Find-Ssh
-    if (-not $ssh) { Fail "Nao achei o ssh. Instale o Git for Windows e rode de novo." }
-    $src = Join-Path $InstallDir "src"
-    New-Item -ItemType Directory -Force -Path $src | Out-Null
-
-    $keyText = $GitKey -replace "`r`n", "`n" -replace "`r", "`n"
-    if (-not $keyText.EndsWith("`n")) { $keyText += "`n" }
-    $keyFile = New-TemporaryFile
-    $knownFile = New-TemporaryFile
-    $script:SecretFiles += @($keyFile.FullName, $knownFile.FullName)
-    $utf8 = New-Object System.Text.UTF8Encoding $false
-    [System.IO.File]::WriteAllText($keyFile.FullName, $keyText, $utf8)
-    & icacls.exe $keyFile.FullName /inheritance:r | Out-Null
-    & icacls.exe $keyFile.FullName /grant:r "${env:USERNAME}:(R)" | Out-Null
-
-    $keyscan = Join-Path (Split-Path $ssh) "ssh-keyscan.exe"
-    if (-not (Test-Path $keyscan)) { $keyscan = "ssh-keyscan.exe" }
-    $ErrorActionPreference = "Continue"
-    $scan = & $keyscan -T 10 -t ed25519,rsa bitbucket.org 2>$null
-    $ErrorActionPreference = "Stop"
-    if (-not $scan) { Fail "Nao consegui obter a chave do servidor bitbucket.org." }
-    [System.IO.File]::WriteAllText($knownFile.FullName, (($scan | Out-String).Trim() + "`n"), $utf8)
-
-    $keyForSsh = ($keyFile.FullName -replace '\\', '/')
-    $knownForSsh = ($knownFile.FullName -replace '\\', '/')
-    $env:GIT_SSH_COMMAND = "`"$ssh`" -i `"$keyForSsh`" -o IdentitiesOnly=yes -o UserKnownHostsFile=`"$knownForSsh`" -o StrictHostKeyChecking=yes"
-    $env:GIT_TERMINAL_PROMPT = "0"
-    foreach ($repo in @("ncommerce_api", "ncommerce", "nfce")) {
-        $dest = Join-Path $src $repo
-        if (Test-Path (Join-Path $dest ".git")) {
-            Write-Host "$repo ja esta em $dest"
-            continue
-        }
-        if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
-        Write-Host "Clonando $repo..."
-        $ErrorActionPreference = "Continue"
-        # A saida do git entra na mensagem: chave recusada, rede caindo e nome de arquivo
-        # que o Windows nao aceita (aux, con, nul...) falham todos aqui.
-        $cloneOut = & git.exe clone --quiet "git@bitbucket.org:Aleksandrus/$repo.git" $dest 2>&1 | ForEach-Object { "$_" }
-        $cloneCode = $LASTEXITCODE
-        $ErrorActionPreference = "Stop"
-        if ($cloneCode -ne 0) {
-            if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
-            $detail = (@($cloneOut) | Where-Object { $_ -match "\S" } | Select-Object -Last 4) -join " "
-            Fail "Nao consegui clonar $repo (git saiu com $cloneCode). $detail"
-        }
-    }
-    Remove-Secrets
 }
 
 # docker compose exec, com o console aberto, espera EOF no stdin e nao volta.
@@ -607,9 +513,7 @@ if (-not $grant) {
 Set-AnyDeskPassword ([string]$grant.anydesk_password)
 $grant.PSObject.Properties.Remove("anydesk_password")
 $ncommerceToken = [string]$grant.token
-$gitKey = [string]$grant.git_private_key
-Clone-Repos $gitKey
-$gitKey = $null
+$grant.PSObject.Properties.Remove("git_private_key")
 
 $cupsPort = 631
 $listen = Get-NetTCPConnection -LocalPort 631 -State Listen -ErrorAction SilentlyContinue
@@ -782,7 +686,6 @@ Write-Host "  Site:  http://${siteHost}:4200"
 Write-Host "  API:   http://localhost:3000"
 Write-Host "  CUPS:  http://127.0.0.1:$cupsPort"
 Write-Host "  SSH:   porta 22, usuario e senha desta conta do Windows"
-Write-Host "Codigo-fonte em C:\NCommerce\src (ncommerce_api, ncommerce, nfce)."
 Write-Host "A tarefa '$TaskName' sobe a stack quando alguem entra no Windows."
 Write-Host "Depois de uma queda de energia o PC precisa logar sozinho: netplwiz."
 Write-Host "Atualizar: atalho Atualizar NCommerce na Area de Trabalho."
