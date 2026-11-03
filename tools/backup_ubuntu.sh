@@ -143,6 +143,21 @@ if [ -f /etc/cups/printers.conf ] || [ -d /etc/cups/ppd ]; then
   if [ -d /etc/cups/ppd ] && sudo tar -C /etc/cups -czf "$WORK/cups_ppd.tar.gz" ppd; then
     sudo chown "$(id -u):$(id -g)" "$WORK/cups_ppd.tar.gz"
     ZIP_FILES+=(cups_ppd.tar.gz)
+    # Filtros que os .ppd usam (*cupsFilter), para o driver funcionar no
+    # Docker mesmo sendo de uma marca que a imagem nao traz.
+    filters="$(sudo sh -c 'cat /etc/cups/ppd/*.ppd 2>/dev/null' | grep -E '^\*cupsFilter2?:' \
+      | sed -E 's/^[^"]*"//; s/".*$//' | awk '{print $NF}' | sed 's#^/usr/lib/cups/filter/##' \
+      | grep -vE '^-$|/' | sort -u || true)"
+    filter_files=()
+    for f in $filters; do
+      if [ -e "/usr/lib/cups/filter/$f" ]; then filter_files+=("$f"); fi
+    done
+    if [ "${#filter_files[@]}" -gt 0 ] \
+       && sudo tar -C /usr/lib/cups/filter -czhf "$WORK/cups_filters.tar.gz" "${filter_files[@]}"; then
+      sudo chown "$(id -u):$(id -g)" "$WORK/cups_filters.tar.gz"
+      ZIP_FILES+=(cups_filters.tar.gz)
+      echo "  drivers: ${filter_files[*]}"
+    fi
   fi
 fi
 

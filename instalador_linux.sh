@@ -407,6 +407,28 @@ download_backup() {
   echo "Backup baixado em ${dest}."
 }
 
+# Impressoras, drivers (.ppd) e filtros do backup no CUPS do container. A imagem
+# traz o ncommerce-restore-cups, que para o cupsd, troca os arquivos e religa.
+# Imagem antiga sem ele: so o printers.conf, como antes. Falha aqui nao para a
+# instalacao: as impressoras podem ser configuradas de novo pela web do CUPS.
+restore_printers() {
+  local work="$1" f files=()
+  for f in printers.conf cups_ppd.tar.gz cups_filters.tar.gz; do
+    if [ -f "$work/$f" ]; then files+=("$f"); fi
+  done
+  [ "${#files[@]}" -gt 0 ] || return 0
+  if sudo docker compose exec -T api sh -c 'command -v ncommerce-restore-cups' >/dev/null 2>&1 < /dev/null; then
+    sudo docker compose exec -T api sh -c 'rm -rf /tmp/ncommerce-cups && mkdir -p /tmp/ncommerce-cups' < /dev/null || true
+    for f in "${files[@]}"; do
+      sudo docker compose cp "$work/$f" "api:/tmp/ncommerce-cups/$f" || true
+    done
+    sudo docker compose exec -T api sh -c 'ncommerce-restore-cups /tmp/ncommerce-cups; s=$?; rm -rf /tmp/ncommerce-cups; exit $s' < /dev/null \
+      || echo "Nao restaurei todas as impressoras. Configure as que faltarem em http://127.0.0.1:${CUPS_PORT:-631}."
+  elif [ -f "$work/printers.conf" ]; then
+    sudo docker compose cp "$work/printers.conf" api:/etc/cups/printers.conf || true
+  fi
+}
+
 restore_backup_into_docker() {
   local zip="$INSTALL_DIR/ncommerce.zip" work pass marker
   marker="$INSTALL_DIR/.backup-restored"
@@ -449,9 +471,7 @@ restore_backup_into_docker() {
   if [ -d "$work/notas_output" ]; then
     sudo docker compose cp "$work/notas_output" api:/data/nfce/ || true
   fi
-  if [ -f "$work/printers.conf" ]; then
-    sudo docker compose cp "$work/printers.conf" api:/etc/cups/printers.conf || true
-  fi
+  restore_printers "$work"
   rm -rf "$work"
   sudo touch "$marker"
   echo "Backup restaurado nos containers."

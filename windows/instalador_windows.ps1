@@ -245,7 +245,12 @@ mysql -h mysql -uroot -pncommerce_root ncommerce_api_production < backup.sql
 if [ -d business_docs ]; then cp -a business_docs /app/ncommerce_api/; fi
 if [ -d essentials ]; then cp -a essentials /data/nfce/; fi
 if [ -d notas_output ]; then cp -a notas_output /data/nfce/; fi
-if [ -f printers.conf ]; then cp -a printers.conf /etc/cups/printers.conf; fi
+# Impressoras, drivers (.ppd) e filtros. Imagem antiga sem o restaurador: so o printers.conf.
+if command -v ncommerce-restore-cups >/dev/null 2>&1; then
+  ncommerce-restore-cups /tmp/ncommerce-restore || echo "Nao restaurei todas as impressoras. Configure as que faltarem na web do CUPS."
+elif [ -f printers.conf ]; then
+  cp -a printers.conf /etc/cups/printers.conf
+fi
 rm -rf /tmp/ncommerce.zip /tmp/ncommerce-restore /tmp/ncommerce-restore.sh
 '@
     $restore = $restore -replace "`r`n", "`n" -replace "`r", "`n"
