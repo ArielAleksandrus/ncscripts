@@ -6,14 +6,25 @@
 # pelo token da empresa. A maquina recebe so as imagens do registry, sem codigo-fonte.
 # Reexecutar nao apaga volume.
 #   --ignorar-requisitos  instala num PC abaixo do minimo (suporte, por conta e risco).
+#   --backup ARQUIVO.zip  restaura este zip de backup em vez do backup do mestre.
+#                         Sem a opcao, o instalador pergunta: arraste o zip para o
+#                         terminal ou tecle Enter para usar o do mestre.
 set -euo pipefail
 
 IGNORAR_REQUISITOS=0
-for arg in "$@"; do
-  case "$arg" in
+BACKUP_ZIP_ARG=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
     --ignorar-requisitos) IGNORAR_REQUISITOS=1 ;;
-    *) echo "Opcao desconhecida: $arg"; exit 1 ;;
+    --backup)
+      [ "$#" -ge 2 ] || { echo "Use: --backup /caminho/ncommerce.zip"; exit 1; }
+      BACKUP_ZIP_ARG="$2"
+      shift
+      ;;
+    --backup=*) BACKUP_ZIP_ARG="${1#--backup=}" ;;
+    *) echo "Opcao desconhecida: $1"; exit 1 ;;
   esac
+  shift
 done
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -255,6 +266,151 @@ PY
   fi
 }
 
+# Caminho de um arquivo arrastado para o terminal. O GNOME Terminal cola
+# '/caminho com espaco/x.zip' entre aspas e com espaco no fim; outros terminais
+# escapam os espacos (\ ) ou colam file:///caminho%20x.zip.
+normalize_dropped_path() {
+  python3 -c '
+import sys, urllib.parse
+p = sys.argv[1].strip()
+if len(p) >= 2 and p[0] == p[-1] and p[0] in "\x27\x22":
+    p = p[1:-1]
+elif p.startswith("file://"):
+    p = urllib.parse.unquote(p[len("file://"):])
+else:
+    p = p.replace("\\ ", " ")
+sys.stdout.write(p)
+' "$1"
+}
+
+# Um zip de backup do NCommerce desta empresa: criptografado com os 6 primeiros
+# caracteres do token (o backup.sh grava assim), abre com eles e traz o backup.sql.
+# Escreve o motivo quando o zip nao serve; nada quando serve.
+backup_zip_problem() {
+  local zip="$1" pass="${NCOMMERCE_TOKEN:0:6}"
+  if [ ! -f "$zip" ]; then
+    echo "Nao achei o arquivo ${zip}."
+  elif [ ! -r "$zip" ]; then
+    echo "Sem permissao para ler ${zip}."
+  elif ! unzip -Z1 "$zip" >/dev/null 2>&1; then
+    echo "${zip} nao e um arquivo zip."
+  elif ! unzip -Z1 "$zip" 2>/dev/null | grep -qx 'backup.sql'; then
+    echo "${zip} nao e um backup do NCommerce: falta o backup.sql."
+  elif unzip -tqq -P "nao-e-a-senha-$$" "$zip" >/dev/null 2>&1; then
+    echo "${zip} nao esta criptografado. Backup do NCommerce sempre vem com senha."
+  elif ! unzip -tqq -P "$pass" "$zip" >/dev/null 2>&1; then
+    echo "${zip} nao abre com o token desta empresa${COMPANY_NAME:+ (${COMPANY_NAME})}: e backup de outra empresa ou esta corrompido."
+  fi
+}
+
+# Backup que a instalacao restaura: o zip de --backup, um zip arrastado para o
+# terminal ou, sem nenhum, o do mestre (BACKUP_ZIP fica vazio).
+BACKUP_ZIP=""
+choose_backup_zip() {
+  local raw path problem
+  if [ -n "$BACKUP_ZIP_ARG" ]; then
+    path="$(normalize_dropped_path "$BACKUP_ZIP_ARG")"
+    problem="$(backup_zip_problem "$path")"
+    if [ -n "$problem" ]; then
+      echo "$problem"
+      exit 1
+    fi
+    BACKUP_ZIP="$(readlink -f "$path")"
+    echo "Backup avulso valido: ${BACKUP_ZIP}."
+    return 0
+  fi
+  [ -r /dev/tty ] || return 0
+  echo
+  echo "Backup: para restaurar um zip de backup avulso, arraste o arquivo para esta janela e tecle Enter."
+  echo "Para usar o backup guardado no servidor, so tecle Enter."
+  while true; do
+    read -r -p "Zip de backup (Enter = servidor): " raw < /dev/tty || raw=""
+    path="$(normalize_dropped_path "$raw")"
+    if [ -z "$path" ]; then
+      echo "Usando o backup do servidor."
+      return 0
+    fi
+    problem="$(backup_zip_problem "$path")"
+    if [ -z "$problem" ]; then
+      BACKUP_ZIP="$(readlink -f "$path")"
+      echo "Backup avulso valido: ${BACKUP_ZIP}."
+      return 0
+    fi
+    echo "$problem"
+    echo "Arraste outro zip, ou tecle Enter para usar o backup do servidor."
+  done
+}
+
+# Um zip avulso entra no lugar do backup do mestre. Escolhido de proposito,
+# ele e restaurado mesmo numa maquina que ja restaurou um backup antes.
+use_backup_zip() {
+  local dest="$INSTALL_DIR/ncommerce.zip"
+  sudo mkdir -p "$INSTALL_DIR"
+  if [ "$(readlink -f "$dest" 2>/dev/null || true)" != "$BACKUP_ZIP" ]; then
+    sudo cp "$BACKUP_ZIP" "$dest"
+  fi
+  sudo chown "$USER:$USER" "$dest" 2>/dev/null || true
+  sudo rm -f "$INSTALL_DIR/.backup-restored"
+  echo "Backup avulso copiado para ${dest}."
+}
+
+# Instalacao nativa antiga nesta maquina (nginx + Passenger em ~/NCommerce).
+# Tirar so os sites do nginx nao basta: o Sidekiq e o tunel SSH nativos sao
+# processos soltos e continuariam buscando pedidos do iFood, falando com o
+# mestre com o mesmo token e segurando as portas do tunel. O cron de backup
+# nativo tambem sai. O MySQL nativo fica, com os dados (o do container nao usa
+# a porta 3306 do PC).
+NATIVE_SIDEKIQ_PATTERN='^sidekiq [0-9]'
+NATIVE_TUNNEL_PATTERN='^ssh .*-R .*tunnel[.]nlabs[.]live'
+# Processos do usuario fora de container (os do Docker ficam num cgroup docker).
+native_pids() {
+  local pid
+  for pid in $(pgrep -u "$USER" -f "$1" 2>/dev/null || true); do
+    if ! grep -qE 'docker|containerd' "/proc/$pid/cgroup" 2>/dev/null; then
+      echo "$pid"
+    fi
+  done
+}
+stop_native_pids() {
+  local pids
+  pids="$(native_pids "$1")"
+  [ -n "$pids" ] || return 1
+  # shellcheck disable=SC2086
+  kill $pids 2>/dev/null || true
+}
+stop_native_install() {
+  local found=0 site
+  for site in ncommerce ncommerce-api; do
+    if [ -e "/etc/nginx/sites-enabled/$site" ]; then found=1; fi
+  done
+  if [ -n "$(native_pids "$NATIVE_SIDEKIQ_PATTERN")" ]; then found=1; fi
+  if [ -n "$(native_pids "$NATIVE_TUNNEL_PATTERN")" ]; then found=1; fi
+  if crontab -l 2>/dev/null | grep -q 'ncommerce_api/vendor/scripts'; then found=1; fi
+  [ "$found" -eq 1 ] || return 0
+
+  echo "Achei uma instalacao nativa do NCommerce. Desligando para o Docker assumir:"
+  for site in ncommerce ncommerce-api; do
+    if [ -e "/etc/nginx/sites-enabled/$site" ]; then
+      sudo rm -f "/etc/nginx/sites-enabled/$site"
+      echo "  - site $site tirado do nginx"
+    fi
+  done
+  if command -v nginx >/dev/null 2>&1; then
+    sudo systemctl restart nginx 2>/dev/null || sudo service nginx restart 2>/dev/null || true
+  fi
+  if stop_native_pids "$NATIVE_SIDEKIQ_PATTERN"; then
+    echo "  - Sidekiq nativo parado"
+  fi
+  if stop_native_pids "$NATIVE_TUNNEL_PATTERN"; then
+    echo "  - tunel nativo fechado"
+  fi
+  if crontab -l 2>/dev/null | grep -q 'ncommerce_api/vendor/scripts'; then
+    crontab -l 2>/dev/null | grep -v 'ncommerce_api/vendor/scripts' | crontab - || true
+    echo "  - backup nativo tirado do cron"
+  fi
+  sleep 2
+}
+
 # 200 grava o zip. 204 significa empresa sem backup. Outro HTTP aborta.
 download_backup() {
   local code="$1" mid http dest tmp
@@ -434,6 +590,8 @@ if [ -z "$CODE" ] || ! redeem "$CODE"; then
 fi
 set_anydesk_password
 unset ANYDESK_PASSWORD
+choose_backup_zip
+stop_native_install
 # Instaladores antigos clonavam o codigo-fonte em src/. A stack roda das
 # imagens e nada usa essa pasta.
 if [ -d "$INSTALL_DIR/src" ]; then
@@ -554,7 +712,11 @@ else
   fi
 fi
 
-download_backup "$CODE"
+if [ -n "$BACKUP_ZIP" ]; then
+  use_backup_zip
+else
+  download_backup "$CODE"
+fi
 unset CODE
 cd "$INSTALL_DIR"
 restore_backup_into_docker
