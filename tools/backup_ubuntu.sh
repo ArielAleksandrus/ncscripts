@@ -16,6 +16,8 @@ OUT_DIR="$(pwd)"
 NC_DIR="${1:-$HOME/NCommerce}"
 APP_ROOT="$NC_DIR/ncommerce_api"
 NFCE_DIST="$NC_DIR/nfce/dist"
+# Segundo CNPJ (PluginZnf). So entra no zip se estiver configurado.
+NFCE_EXT="$NC_DIR/aux/nfce/dist"
 ENV_FILE="$APP_ROOT/.env.production"
 
 if [ "$(id -u)" -eq 0 ]; then
@@ -128,12 +130,26 @@ if [ "${#nfce_parts[@]}" -gt 0 ]; then
 else
   echo "  (sem arquivos da NFC-e em $NFCE_DIST)"
 fi
+# O .last_id numera as notas do segundo CNPJ. Jar, lib e schemas ficam de fora:
+# sao os mesmos da NFC-e principal.
+if [ -f "$NFCE_EXT/essentials/config/dados_emitente.json" ]; then
+  echo "Juntando os arquivos da NFC-e do segundo CNPJ..."
+  ext_parts=()
+  for part in essentials notas_output backup notas_compra notas_input notas_log .last_id; do
+    if [ -e "$NFCE_EXT/$part" ]; then ext_parts+=("$part"); fi
+  done
+  (cd "$NFCE_EXT" && zip -qr "$WORK/nfce_ext.zip" "${ext_parts[@]}" -x 'essentials/schemas/*')
+fi
+if [ -n "$(find "$APP_ROOT/app/lib/plugins" -type f -name '*.rb' 2>/dev/null | head -1)" ]; then
+  echo "Juntando os plugins..."
+  (cd "$APP_ROOT/app/lib/plugins" && zip -qr "$WORK/plugins.zip" . -x .keep)
+fi
 cp "$ENV_FILE" "$WORK/env.txt"
 
 # Sem documentos ou sem NFC-e, o zip interno fica de fora: o instalador so
 # abre docs.zip e nfce.zip quando existem.
 ZIP_FILES=(backup.sql env.txt)
-for z in docs.zip nfce.zip; do
+for z in docs.zip nfce.zip nfce_ext.zip plugins.zip; do
   if [ -f "$WORK/$z" ]; then ZIP_FILES+=("$z"); fi
 done
 if [ -f /etc/cups/printers.conf ] || [ -d /etc/cups/ppd ]; then

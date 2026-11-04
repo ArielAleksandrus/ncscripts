@@ -50,6 +50,7 @@ services:
       NCOMMERCE_API_DATABASE_PASSWORD: ncommerce
       NFCE_JAR: /opt/nfce
       NFCE_DATA: /data/nfce
+      NFCE_EXTERNAL: /data/nfce/externo
       COMPUTER_USER: root
       BACKUP_DIR: /var/ncommerce/backups
       PORT: "3000"
@@ -80,6 +81,9 @@ services:
       - ./bin/ip:/usr/local/bin/ip:ro
       # O host grava aqui o ID do AnyDesk ao ligar (anydesk-id.sh / anydesk-id.ps1).
       - ./host:/host:ro
+      # Plugins da loja: Documentos/ncommerce/plugins do usuario (o instalador grava o caminho).
+      # Plugin novo carrega no botao Reiniciar NCommerce (Configuracoes > Empresa).
+      - ${NCOMMERCE_PLUGINS_DIR:-./plugins}:/app/ncommerce_api/app/lib/plugins:ro
 
   web:
     image: ${NCOMMERCE_REGISTRY:-ncommerce.app:5050}/ncommerce/web:${NCOMMERCE_TAG:-latest}

@@ -407,6 +407,16 @@ if [ -d business_docs ]; then cp -a business_docs /app/ncommerce_api/; fi
 for part in essentials notas_output backup notas_compra notas_input notas_log; do
   if [ -d "$part" ]; then cp -a "$part" /data/nfce/; fi
 done
+# Segundo CNPJ: a pasta inteira, com o .last_id que numera as notas dele.
+if [ -f nfce_ext.zip ]; then
+  mkdir -p nfce_ext /data/nfce/externo
+  unzip -o nfce_ext.zip -d nfce_ext >/dev/null
+  cp -a nfce_ext/. /data/nfce/externo/
+fi
+# Plugins: o instalador copia daqui para Documentos\ncommerce\plugins (montado so leitura).
+rm -rf /tmp/ncommerce-plugins
+mkdir -p /tmp/ncommerce-plugins
+if [ -f plugins.zip ]; then unzip -o plugins.zip -d /tmp/ncommerce-plugins >/dev/null; fi
 # Impressoras, drivers (.ppd) e filtros. Imagem antiga sem o restaurador: so o printers.conf.
 if command -v ncommerce-restore-cups >/dev/null 2>&1; then
   ncommerce-restore-cups /tmp/ncommerce-restore || echo "Nao restaurei todas as impressoras. Configure as que faltarem na web do CUPS."
@@ -443,8 +453,42 @@ rm -rf /tmp/ncommerce.zip /tmp/ncommerce-restore /tmp/ncommerce-restore.sh
     if ($copyCode -ne 0) {
         Fail "Nao abri o backup. A senha sao os 6 primeiros caracteres do token, e o zip ficou em $zip."
     }
+    Restore-BackupPlugins
     New-Item -ItemType File -Force -Path $marker | Out-Null
     Write-Host "Backup restaurado nos containers."
+}
+
+# O restore deixou os plugins do backup em /tmp/ncommerce-plugins no container.
+# Eles vao para Documentos\ncommerce\plugins e a API reinicia para carregar.
+function Restore-BackupPlugins {
+    Push-Location $InstallDir
+    $ErrorActionPreference = "Continue"
+    $list = Invoke-ComposeExec exec -T api find /tmp/ncommerce-plugins -type f
+    if ($LASTEXITCODE -eq 0 -and $list.Trim()) {
+        & $DockerExe compose cp "api:/tmp/ncommerce-plugins/." $PluginsDir
+        Write-Host "Plugins restaurados em $PluginsDir."
+        & $DockerExe compose restart api
+        $probe = New-TemporaryFile
+        for ($i = 1; $i -le 60; $i++) {
+            if ((Get-DockerSetup $probe.FullName) -eq "200") { break }
+            Start-Sleep -Seconds 3
+        }
+        Remove-Item $probe.FullName -Force -ErrorAction SilentlyContinue
+    }
+    Invoke-ComposeExec exec -T api rm -rf /tmp/ncommerce-plugins | Out-Null
+    $ErrorActionPreference = "Stop"
+    Pop-Location
+}
+
+# Documentos do usuario (MyDocuments segue o OneDrive quando ele move a pasta).
+# O compose monta Documentos\ncommerce\plugins em app/lib/plugins.
+function Initialize-PluginsDir {
+    $docs = [Environment]::GetFolderPath("MyDocuments")
+    $dir = Join-Path $docs "ncommerce\plugins"
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $readme = "Plugins do NCommerce`r`n`r`nCopie o arquivo do plugin (.rb) para a pasta plugins, ao lado deste arquivo.`r`nDepois entre como admin e use o botao Reiniciar NCommerce em`r`nConfiguracoes > Empresa. O plugin entra no backup da loja.`r`n"
+    [System.IO.File]::WriteAllText((Join-Path $docs "ncommerce\LEIA-ME.txt"), $readme)
+    return $dir
 }
 
 # MySQL, API, CUPS e o WSL do Docker Desktop juntos nao cabem em 4 GB: o PC passa a
@@ -706,13 +750,14 @@ Copy-Item (Join-Path $Root "windows\usb-printers.ps1") (Join-Path $InstallDir "u
 Copy-Item (Join-Path $Root "windows\update-host.ps1") (Join-Path $InstallDir "update-host.ps1") -Force
 Copy-Item (Join-Path $Root "windows\drivers") $InstallDir -Recurse -Force
 
+$PluginsDir = Initialize-PluginsDir
 $envFile = Join-Path $InstallDir ".env"
 $registry = $env:NCOMMERCE_REGISTRY
 if (-not $registry) { $registry = [string]$grant.registry }
 if (-not $registry) { $registry = Read-EnvValue $envFile "NCOMMERCE_REGISTRY" "ncommerce.app:5050" }
 $tag = $env:NCOMMERCE_TAG
 if (-not $tag) { $tag = Read-EnvValue $envFile "NCOMMERCE_TAG" "latest" }
-$envBody = "CUPS_PORT=$cupsPort`nNCOMMERCE_REGISTRY=$registry`nNCOMMERCE_TAG=$tag`n"
+$envBody = "CUPS_PORT=$cupsPort`nNCOMMERCE_REGISTRY=$registry`nNCOMMERCE_TAG=$tag`nNCOMMERCE_PLUGINS_DIR=$($PluginsDir.Replace('\', '/'))`n"
 [System.IO.File]::WriteAllText($envFile, $envBody)
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir "refresh-host-ips.ps1") $InstallDir
 if ($LASTEXITCODE -ne 0) { Fail "Nao consegui gravar os IPs desta maquina." }

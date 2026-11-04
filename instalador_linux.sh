@@ -471,7 +471,21 @@ restore_backup_into_docker() {
       sudo docker compose cp "$work/$part" api:/data/nfce/ || true
     fi
   done
+  # Segundo CNPJ: a pasta inteira, com o .last_id que numera as notas dele.
+  if [ -f "$work/nfce_ext.zip" ]; then
+    mkdir -p "$work/nfce_ext"
+    unzip -o "$work/nfce_ext.zip" -d "$work/nfce_ext" >/dev/null
+    sudo docker compose exec -T api mkdir -p /data/nfce/externo < /dev/null || true
+    sudo docker compose cp "$work/nfce_ext/." api:/data/nfce/externo/ || true
+  fi
   restore_printers "$work"
+  # Plugins voltam para Documentos/ncommerce/plugins; a API so carrega ao subir.
+  if [ -f "$work/plugins.zip" ]; then
+    unzip -o "$work/plugins.zip" -d "$PLUGINS_DIR" >/dev/null
+    echo "Plugins restaurados em ${PLUGINS_DIR}."
+    sudo docker compose restart api
+    wait_api_up
+  fi
   rm -rf "$work"
   sudo touch "$marker"
   echo "Backup restaurado nos containers."
@@ -507,6 +521,38 @@ token_already_on_volume() {
 
 # A imagem publicada responde 403 para Host 127.0.0.1. localhost esta permitido.
 # Conectamos no IP e enviamos esse Host, senao o curl -f desiste e o token nao e gravado.
+# Documentos do usuario (Documentos ou Documents, conforme o idioma). O compose monta
+# Documentos/ncommerce/plugins em app/lib/plugins: quem tem plugin copia o arquivo para la.
+prepare_plugins_dir() {
+  local docs=""
+  if command -v xdg-user-dir >/dev/null 2>&1; then
+    docs="$(xdg-user-dir DOCUMENTS 2>/dev/null || true)"
+  fi
+  # Sem pasta configurada o xdg-user-dir responde a HOME.
+  if [ -z "$docs" ] || [ "$docs" = "$HOME" ]; then
+    if [ -d "$HOME/Documentos" ]; then docs="$HOME/Documentos"; else docs="$HOME/Documents"; fi
+  fi
+  PLUGINS_DIR="$docs/ncommerce/plugins"
+  mkdir -p "$PLUGINS_DIR"
+  cat > "$docs/ncommerce/LEIA-ME.txt" <<'EOF'
+Plugins do NCommerce
+
+Copie o arquivo do plugin (.rb) para a pasta plugins, ao lado deste arquivo.
+Depois entre como admin e use o botao Reiniciar NCommerce em
+Configuracoes > Empresa. O plugin entra no backup da loja.
+EOF
+}
+
+# Espera a API responder de novo depois de um restart do container.
+wait_api_up() {
+  local i
+  for i in $(seq 1 60); do
+    if [ "$(api_setup /dev/null)" = "200" ]; then return 0; fi
+    sleep 3
+  done
+  echo "A API demorou para voltar depois de carregar os plugins."
+}
+
 api_setup() {
   local dest="$1"
   curl -sS -o "$dest" -w "%{http_code}" -m 5 \
@@ -624,6 +670,7 @@ file_tag="$(read_env_key "$INSTALL_DIR/.env" NCOMMERCE_TAG)"
 REGISTRY="${REQUESTED_REGISTRY:-${file_registry:-${REGISTRY_FROM_MASTER:-ncommerce.app:5050}}}"
 TAG="${REQUESTED_TAG:-${file_tag:-latest}}"
 
+prepare_plugins_dir
 sudo mkdir -p "$INSTALL_DIR"
 sudo cp "$ROOT/docker/docker-compose.yml" "$INSTALL_DIR/docker-compose.yml"
 sudo cp "$ROOT/docker/docker-compose.usb.yml" "$INSTALL_DIR/docker-compose.usb.yml"
@@ -636,6 +683,7 @@ CUPS_PORT=${CUPS_PORT}
 NCOMMERCE_REGISTRY=${REGISTRY}
 NCOMMERCE_TAG=${TAG}
 COMPOSE_FILE=docker-compose.yml:docker-compose.usb.yml
+NCOMMERCE_PLUGINS_DIR=${PLUGINS_DIR}
 EOF
 sudo chmod 644 "$INSTALL_DIR/.env" "$INSTALL_DIR/docker-compose.yml" "$INSTALL_DIR/docker-compose.usb.yml" "$INSTALL_DIR/host-ips.sh"
 
