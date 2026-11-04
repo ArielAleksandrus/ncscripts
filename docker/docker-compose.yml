@@ -51,6 +51,9 @@ services:
       NFCE_JAR: /opt/nfce
       NFCE_DATA: /data/nfce
       NFCE_EXTERNAL: /data/nfce/externo
+      # Fuso do host (o instalador grava TZ no .env). O jar da NFC-e monta o dhEmi
+      # com `date`; em UTC a SEFAZ rejeita a nota (703, emissao no futuro).
+      TZ: ${TZ:-America/Sao_Paulo}
       COMPUTER_USER: root
       BACKUP_DIR: /var/ncommerce/backups
       PORT: "3000"

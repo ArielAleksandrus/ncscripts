@@ -543,6 +543,15 @@ Configuracoes > Empresa. O plugin entra no backup da loja.
 EOF
 }
 
+# Fuso do host, para o container emitir a NFC-e no mesmo horario.
+host_timezone() {
+  local tz=""
+  tz="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+  if [ -z "$tz" ] && [ -f /etc/timezone ]; then tz="$(cat /etc/timezone)"; fi
+  if [ -z "$tz" ]; then tz="$(readlink -f /etc/localtime 2>/dev/null | sed -n 's#^/usr/share/zoneinfo/##p')"; fi
+  echo "${tz:-America/Sao_Paulo}"
+}
+
 # Espera a API responder de novo depois de um restart do container.
 wait_api_up() {
   local i
@@ -684,6 +693,7 @@ NCOMMERCE_REGISTRY=${REGISTRY}
 NCOMMERCE_TAG=${TAG}
 COMPOSE_FILE=docker-compose.yml:docker-compose.usb.yml
 NCOMMERCE_PLUGINS_DIR=${PLUGINS_DIR}
+TZ=$(host_timezone)
 EOF
 sudo chmod 644 "$INSTALL_DIR/.env" "$INSTALL_DIR/docker-compose.yml" "$INSTALL_DIR/docker-compose.usb.yml" "$INSTALL_DIR/host-ips.sh"
 

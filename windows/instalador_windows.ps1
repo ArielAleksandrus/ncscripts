@@ -480,6 +480,24 @@ function Restore-BackupPlugins {
     Pop-Location
 }
 
+# Fuso do Windows no nome IANA que o container usa (TZ). O jar da NFC-e monta o
+# dhEmi com `date`; em UTC a SEFAZ rejeita a nota (703, emissao no futuro).
+function Get-IanaTimeZone {
+    $map = @{
+        "E. South America Standard Time" = "America/Sao_Paulo"
+        "SA Eastern Standard Time" = "America/Fortaleza"
+        "Bahia Standard Time" = "America/Bahia"
+        "Tocantins Standard Time" = "America/Araguaina"
+        "Central Brazilian Standard Time" = "America/Cuiaba"
+        "SA Western Standard Time" = "America/Manaus"
+        "SA Pacific Standard Time" = "America/Rio_Branco"
+        "UTC-02" = "America/Noronha"
+    }
+    $id = [System.TimeZoneInfo]::Local.Id
+    if ($map.ContainsKey($id)) { return $map[$id] }
+    return "America/Sao_Paulo"
+}
+
 # Documentos do usuario (MyDocuments segue o OneDrive quando ele move a pasta).
 # O compose monta Documentos\ncommerce\plugins em app/lib/plugins.
 function Initialize-PluginsDir {
@@ -757,7 +775,7 @@ if (-not $registry) { $registry = [string]$grant.registry }
 if (-not $registry) { $registry = Read-EnvValue $envFile "NCOMMERCE_REGISTRY" "ncommerce.app:5050" }
 $tag = $env:NCOMMERCE_TAG
 if (-not $tag) { $tag = Read-EnvValue $envFile "NCOMMERCE_TAG" "latest" }
-$envBody = "CUPS_PORT=$cupsPort`nNCOMMERCE_REGISTRY=$registry`nNCOMMERCE_TAG=$tag`nNCOMMERCE_PLUGINS_DIR=$($PluginsDir.Replace('\', '/'))`n"
+$envBody = "CUPS_PORT=$cupsPort`nNCOMMERCE_REGISTRY=$registry`nNCOMMERCE_TAG=$tag`nNCOMMERCE_PLUGINS_DIR=$($PluginsDir.Replace('\', '/'))`nTZ=$(Get-IanaTimeZone)`n"
 [System.IO.File]::WriteAllText($envFile, $envBody)
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $InstallDir "refresh-host-ips.ps1") $InstallDir
 if ($LASTEXITCODE -ne 0) { Fail "Nao consegui gravar os IPs desta maquina." }
