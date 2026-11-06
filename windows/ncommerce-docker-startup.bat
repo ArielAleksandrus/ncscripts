@@ -2,6 +2,13 @@
 setlocal EnableExtensions
 rem Sobe o Docker Desktop, se precisar, e religa a stack. Sem pull.
 rem A tarefa "NCommerce Docker Startup" chama este arquivo no logon.
+rem A janela fica aberta enquanto o Docker sobe. O aviso sai antes dessa espera.
+
+title NCommerce
+echo.
+powershell -NoProfile -Command "Write-Host ('INICIANDO O SISTEMA NCOMMERCE. N' + [char]0xC3 + 'O FECHE ESSA JANELA...') -ForegroundColor Yellow"
+echo Ligando o Docker, o AnyDesk e os programas. Pode levar alguns minutos.
+echo.
 
 set "DOCKER=C:\Program Files\Docker\Docker\resources\bin\docker.exe"
 set "DESKTOP=C:\Program Files\Docker\Docker\Docker Desktop.exe"
@@ -18,11 +25,14 @@ if not errorlevel 1 goto ready
 if exist "%DESKTOP%" start "" "%DESKTOP%"
 set /a N=0
 
+echo Aguardando o Docker...
 :wait
 "%DOCKER%" info >nul 2>&1
 if not errorlevel 1 goto ready
 set /a N+=1
 if %N% GEQ 60 goto notready
+set /a MOD=N %% 6
+if %MOD%==0 echo Ainda aguardando o Docker...
 ping -n 6 127.0.0.1 >nul
 goto wait
 
@@ -42,5 +52,6 @@ if /I "%~1"=="pull" (
   "%DOCKER%" compose pull
   if errorlevel 1 exit /b 1
 )
+echo Ligando os programas do NCommerce...
 "%DOCKER%" compose up -d
 exit /b %ERRORLEVEL%

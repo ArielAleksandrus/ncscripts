@@ -9,6 +9,8 @@ $exe = @("${env:ProgramFiles(x86)}\AnyDesk\AnyDesk.exe", "$env:ProgramFiles\AnyD
     Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $exe) { exit 0 }
 
+Write-Host "Conferindo o AnyDesk..."
+
 # Logo depois do logon o servico do AnyDesk ainda nao tem ID e responde 0.
 # O pipe faz o PowerShell esperar a saida do AnyDesk, que e um programa de janela.
 $id = ""

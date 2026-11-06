@@ -17,6 +17,9 @@ Codigo de instalacao
   arquivo codigo-instalacao.txt e nao precisa ser digitado.
   O codigo vale 48 horas e serve para um computador so. Se a instalacao parar no
   meio, rode o instalador de novo no mesmo computador: o codigo continua valendo.
+  No Windows, ligar o WSL2 pode reiniciar o computador. Quando o codigo esta no
+  codigo-instalacao.txt, ao ligar de novo o mestre manda um WhatsApp pedindo
+  para abrir o InstaladorWindows.bat outra vez.
 
 Internet
   O computador precisa de internet durante a instalacao e para atualizar.

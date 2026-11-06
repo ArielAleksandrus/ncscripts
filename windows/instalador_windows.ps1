@@ -52,6 +52,84 @@ function Read-CodeFile {
     return $null
 }
 
+# Nome igual ao de windows/aviso-reinicio.ps1. A tarefa sobe com o Windows,
+# depois do reinicio que liga o WSL2, e pede ao mestre o WhatsApp.
+$RebootTaskName = "NCommerce Aviso Reinicio"
+
+function Clear-RebootNotice {
+    try {
+        Unregister-ScheduledTask -TaskName $RebootTaskName -Confirm:$false -ErrorAction SilentlyContinue
+        $dir = Join-Path $env:ProgramData "NCommerce"
+        foreach ($name in @("aviso-reinicio.ps1", "aviso-reinicio.json", "aviso-reinicio-body.json", "aviso-reinicio-out.txt")) {
+            Remove-Item -LiteralPath (Join-Path $dir $name) -Force -ErrorAction SilentlyContinue
+        }
+    } catch {
+        Write-Host "Nao consegui remover o aviso de reinicio anterior: $($_.Exception.Message)"
+    }
+}
+
+# Agenda o aviso para a proxima inicializacao. Sem a tarefa, avisa na hora.
+# Sem codigo-instalacao.txt nao ha como saber de quem e o WhatsApp.
+function Register-RebootNotice {
+    $code = Read-CodeFile
+    if (-not $code) {
+        Write-Host "Sem o arquivo codigo-instalacao.txt: o WhatsApp depois do reinicio nao sera enviado."
+        return $false
+    }
+    try {
+        $dir = Join-Path $env:ProgramData "NCommerce"
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        $scriptSrc = Join-Path $PSScriptRoot "aviso-reinicio.ps1"
+        if (-not (Test-Path -LiteralPath $scriptSrc)) {
+            throw "Nao achei $scriptSrc."
+        }
+        $scriptDst = Join-Path $dir "aviso-reinicio.ps1"
+        Copy-Item -LiteralPath $scriptSrc -Destination $scriptDst -Force
+        $utf8 = New-Object System.Text.UTF8Encoding $false
+        $config = @{ code = $code; master_url = $MasterUrl; task_name = $RebootTaskName } | ConvertTo-Json -Compress
+        [System.IO.File]::WriteAllText((Join-Path $dir "aviso-reinicio.json"), $config, $utf8)
+
+        $ps = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+        $action = New-ScheduledTaskAction -Execute $ps -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptDst`""
+        $boot = New-ScheduledTaskTrigger -AtStartup
+        try { $boot.Delay = "PT45S" } catch { }
+        $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
+            -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 6)
+        Register-ScheduledTask -TaskName $RebootTaskName -Action $action -Trigger $boot -Principal $principal `
+            -Settings $settings -Description "Avisa o NCommerce para mandar WhatsApp pedindo o InstaladorWindows.bat." -Force | Out-Null
+        Write-Host "Quando o computador ligar, o WhatsApp do cadastro recebe o aviso para abrir o InstaladorWindows.bat de novo."
+        return $true
+    } catch {
+        Write-Host "Nao consegui agendar o aviso de reinicio: $($_.Exception.Message)"
+        if (Send-RebootNoticeNow $code) {
+            Write-Host "Avisamos agora pelo WhatsApp: depois do reinicio, abra o InstaladorWindows.bat de novo."
+            return $true
+        }
+        Write-Host "Nao consegui avisar pelo WhatsApp. Depois do reinicio, abra o InstaladorWindows.bat de novo."
+        return $false
+    }
+}
+
+function Send-RebootNoticeNow([string]$Code) {
+    $payloadFile = New-TemporaryFile
+    $bodyFile = New-TemporaryFile
+    try {
+        $payload = @{ code = $Code; hostname = $env:COMPUTERNAME } | ConvertTo-Json -Compress
+        [System.IO.File]::WriteAllText($payloadFile.FullName, $payload)
+        $ErrorActionPreference = "Continue"
+        $http = & curl.exe -sS -o $bodyFile.FullName -w "%{http_code}" --max-time 20 `
+            -X POST -H "Content-Type: application/json" --data-binary "@$($payloadFile.FullName)" `
+            "$MasterUrl/install/reboot_notice"
+        $ErrorActionPreference = "Stop"
+        return ("$http".Trim() -eq "200")
+    } catch {
+        return $false
+    } finally {
+        Remove-Item $payloadFile.FullName, $bodyFile.FullName -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Get-MachineId {
     $dir = Join-Path $env:ProgramData "NCommerce"
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
@@ -561,6 +639,7 @@ function Initialize-Wsl {
     if ($rebootNeeded) {
         Write-Host ""
         Write-Host "O Windows precisa reiniciar para terminar de ligar o WSL2." -ForegroundColor Yellow
+        Register-RebootNotice | Out-Null
         Write-Host "Depois do reinicio, rode o InstaladorWindows.bat de novo. O codigo de instalacao ainda nao foi usado." -ForegroundColor Yellow
         Read-Host "Pressione Enter para reiniciar agora (ou feche a janela para reiniciar depois)"
         Restart-Computer
@@ -577,6 +656,11 @@ function Initialize-Wsl {
     $ErrorActionPreference = "Stop"
     if ($updateCode -ne 0) { Write-Host "Nao consegui atualizar o WSL (codigo $updateCode)." }
 }
+
+# Uma tentativa anterior pode ter agendado o aviso e o usuario abriu o
+# instalador antes da tarefa rodar. Quem chegou aqui nao precisa do aviso,
+# a menos que este run peca o reinicio de novo e registre outra vez.
+Clear-RebootNotice
 
 Initialize-Wsl
 
@@ -699,6 +783,7 @@ if (-not (Test-Path $DockerExe)) {
     & winget install --source winget --exact --id Docker.DockerDesktop --accept-package-agreements --accept-source-agreements --disable-interactivity `
         --override "install --quiet --accept-license --backend=wsl-2 --always-run-service"
     if (-not (Test-Path $DockerExe)) {
+        Register-RebootNotice | Out-Null
         Fail "Docker Desktop nao apareceu. Se o Windows pediu reinicio, reinicie e rode o instalador de novo."
     }
 }
@@ -724,6 +809,7 @@ if (-not (Test-DockerReady)) {
         Start-Sleep -Seconds 5
     }
     if (-not $ready) {
+        Register-RebootNotice | Out-Null
         Fail "O Docker nao ficou pronto. Reinicie o computador e rode este instalador de novo. O codigo de instalacao ainda nao foi usado."
     }
 }
