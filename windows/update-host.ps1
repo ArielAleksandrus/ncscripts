@@ -39,6 +39,8 @@ try {
         @{ From = "windows\anydesk-id.ps1";             To = "anydesk-id.ps1" },
         @{ From = "windows\usb-printers.ps1";           To = "usb-printers.ps1" },
         @{ From = "windows\update-host.ps1";            To = "update-host.ps1" },
+        @{ From = "docker\guard.sh";                    To = "guard.sh" },
+        @{ From = "windows\rollback.bat";               To = "rollback.bat" },
         @{ From = "windows\ncommerce-docker-update.bat"; To = "ncommerce-docker-update.bat.new" }
     )
     $changed = @()

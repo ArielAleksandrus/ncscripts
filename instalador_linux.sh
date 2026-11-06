@@ -685,7 +685,11 @@ sudo cp "$ROOT/docker/docker-compose.yml" "$INSTALL_DIR/docker-compose.yml"
 sudo cp "$ROOT/docker/docker-compose.usb.yml" "$INSTALL_DIR/docker-compose.usb.yml"
 sudo cp "$ROOT/docker/update.sh" "$INSTALL_DIR/update.sh"
 sudo cp "$ROOT/docker/host-ips.sh" "$INSTALL_DIR/host-ips.sh"
-sudo chmod 755 "$INSTALL_DIR/update.sh"
+sudo cp "$ROOT/docker/update-host.sh" "$INSTALL_DIR/update-host.sh"
+sudo cp "$ROOT/docker/guard.sh" "$INSTALL_DIR/guard.sh"
+sudo cp "$ROOT/docker/rollback.sh" "$INSTALL_DIR/rollback.sh"
+sudo chmod 755 "$INSTALL_DIR/update.sh" "$INSTALL_DIR/update-host.sh" "$INSTALL_DIR/guard.sh" "$INSTALL_DIR/rollback.sh"
+sudo mkdir -p "$INSTALL_DIR/control"
 install_anydesk_id_service
 sudo tee "$INSTALL_DIR/.env" >/dev/null <<EOF
 CUPS_PORT=${CUPS_PORT}

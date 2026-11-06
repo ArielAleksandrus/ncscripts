@@ -48,7 +48,11 @@ if exist "%DIR%\refresh-host-ips.ps1" (
 if exist "%DIR%\anydesk-id.ps1" (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%DIR%\anydesk-id.ps1" "%DIR%"
 )
+if not exist "%DIR%\control" mkdir "%DIR%\control"
+rem Uma troca de versao (servico guard) deixa NCOMMERCE_TAG=keep-VERSAO no .env.
+rem Atualizar volta para a versao publicada. So o pull: no logon a versao trocada fica.
 if /I "%~1"=="pull" (
+  powershell -NoProfile -Command "$f='%DIR%\.env'; $t=[IO.File]::ReadAllText($f) -replace '(?m)^NCOMMERCE_TAG=keep-[^\r\n]*','NCOMMERCE_TAG=latest'; [IO.File]::WriteAllText($f,$t)"
   "%DOCKER%" compose pull
   if errorlevel 1 exit /b 1
 )

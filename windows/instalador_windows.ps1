@@ -852,6 +852,9 @@ Copy-Item (Join-Path $Root "windows\refresh-host-ips.ps1") (Join-Path $InstallDi
 Copy-Item (Join-Path $Root "windows\anydesk-id.ps1") (Join-Path $InstallDir "anydesk-id.ps1") -Force
 Copy-Item (Join-Path $Root "windows\usb-printers.ps1") (Join-Path $InstallDir "usb-printers.ps1") -Force
 Copy-Item (Join-Path $Root "windows\update-host.ps1") (Join-Path $InstallDir "update-host.ps1") -Force
+Copy-Item (Join-Path $Root "docker\guard.sh") (Join-Path $InstallDir "guard.sh") -Force
+Copy-Item (Join-Path $Root "windows\rollback.bat") (Join-Path $InstallDir "rollback.bat") -Force
+New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir "control") | Out-Null
 Copy-Item (Join-Path $Root "windows\drivers") $InstallDir -Recurse -Force
 
 $PluginsDir = Initialize-PluginsDir

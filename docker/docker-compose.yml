@@ -87,6 +87,8 @@ services:
       # Plugins da loja: Documentos/ncommerce/plugins do usuario (o instalador grava o caminho).
       # Plugin novo carrega no botao Reiniciar NCommerce (Configuracoes > Empresa).
       - ${NCOMMERCE_PLUGINS_DIR:-./plugins}:/app/ncommerce_api/app/lib/plugins:ro
+      # Versoes guardadas e pedidos de troca (servico guard). A tela le e pede por aqui.
+      - ./control:/control
 
   web:
     image: ${NCOMMERCE_REGISTRY:-ncommerce.app:5050}/ncommerce/web:${NCOMMERCE_TAG:-latest}
@@ -97,6 +99,21 @@ services:
       - web_promos:/usr/share/nginx/html/assets/promo-tablet
     depends_on:
       - api
+
+  # Guarda as 3 ultimas versoes, volta sozinho para a anterior quando a api nao
+  # para de reiniciar, e troca de versao a pedido da tela ou do rollback.sh/.bat.
+  # O script e o guard.sh desta pasta; a imagem so traz o docker e o compose.
+  guard:
+    image: docker:27.5.1-cli
+    restart: unless-stopped
+    entrypoint: ["sh", "/ncommerce/guard.sh"]
+    environment:
+      NCOMMERCE_KEEP_VERSIONS: ${NCOMMERCE_KEEP_VERSIONS:-3}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/ncommerce
+      # Endereco e token do mestre, para avisar das trocas de versao.
+      - api_env:/env:ro
 
 volumes:
   mysql_data:
