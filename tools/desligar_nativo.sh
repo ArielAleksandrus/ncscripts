@@ -8,7 +8,7 @@
 #   - os sites ncommerce e ncommerce-api do nginx (portas 3000 e 4200);
 #   - as linhas do NCommerce no cron do usuario e do root;
 #   - o Sidekiq e o tunel SSH nativos (os do container ficam);
-#   - os servicos Redis e MySQL nativos, que o Docker nao usa.
+#   - os servicos sidekiq (se houver), Redis e MySQL nativos, que o Docker nao usa.
 # Os dados do MySQL nativo ficam no disco. Faca o backup antes
 # (tools/backup_ubuntu.sh): com o MySQL parado ele nao conecta.
 #
@@ -130,6 +130,9 @@ for pattern in "$SIDEKIQ_PATTERN" "$TUNNEL_PATTERN"; do
   fi
 done
 
+# Lojas antigas com o docker/sidekiq.service instalado: o systemd subiria o
+# Sidekiq nativo de novo no proximo boot.
+stop_service sidekiq
 stop_service redis-server
 if [ "$KEEP_DB" -eq 0 ]; then
   stop_service mysql
