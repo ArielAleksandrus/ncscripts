@@ -78,6 +78,8 @@ services:
       - api_uploads:/app/ncommerce_api/public/uploads
       - api_print:/app/ncommerce_api/print_files
       - api_docs:/app/ncommerce_api/business_docs
+      # production.log (rotativo, 10 x 50MB) e sidekiq.log sobrevivem as atualizacoes.
+      - api_log:/app/ncommerce_api/log
       - api_backups:/var/ncommerce/backups
       - api_env:/env
       # A imagem publicada ainda chama `ip a`. Este arquivo responde com o IP do host.
@@ -122,6 +124,7 @@ volumes:
   api_uploads:
   api_print:
   api_docs:
+  api_log:
   api_backups:
   api_env:
   web_promos:
