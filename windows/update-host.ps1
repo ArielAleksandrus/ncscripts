@@ -38,6 +38,7 @@ try {
         @{ From = "windows\refresh-host-ips.ps1";       To = "refresh-host-ips.ps1" },
         @{ From = "windows\anydesk-id.ps1";             To = "anydesk-id.ps1" },
         @{ From = "windows\usb-printers.ps1";           To = "usb-printers.ps1" },
+        @{ From = "windows\net-check.ps1";             To = "net-check.ps1" },
         @{ From = "windows\update-host.ps1";            To = "update-host.ps1" },
         @{ From = "docker\guard.sh";                    To = "guard.sh" },
         @{ From = "windows\rollback.bat";               To = "rollback.bat" },

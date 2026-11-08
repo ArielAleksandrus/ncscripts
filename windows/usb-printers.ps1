@@ -3,7 +3,7 @@
 # Instala o driver (opcional), liga o servico LPD, abre a 515 e compartilha as impressoras USB.
 # Rode como admin. Impressora plugada depois: a tarefa "NCommerce Impressoras USB" roda
 # este script com -Sincronizar (compartilha e atualiza a lista) quando o Windows cria uma
-# impressora, ao ligar o PC e a cada 2 minutos.
+# impressora, ao ligar o PC e a cada 2 minutos. No mesmo ciclo roda o net-check.ps1.
 # No CUPS do container: lpd://host.docker.internal/<compartilhamento>, com o PPD Elgin ou Bematech.
 # O CUPS manda os dados prontos para a impressora; o Windows so repassa.
 
@@ -136,8 +136,17 @@ function Update-SyncTaskInterval {
     Set-ScheduledTask -TaskName $TaskName -Trigger $task.Triggers | Out-Null
 }
 
+# O mesmo ciclo de 2 minutos procura conflito de IP na rede (host\net_check, lido pelo chat).
+function Invoke-NetCheck {
+    $script = Join-Path $PSScriptRoot "net-check.ps1"
+    if (Test-Path $script) {
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script $PSScriptRoot | Out-Null
+    }
+}
+
 if ($Sincronizar) {
     try { Update-SyncTaskInterval } catch { }
+    try { Invoke-NetCheck } catch { }
     try {
         Share-UsbPrinters | Out-Null
         Write-PrinterList
@@ -153,6 +162,7 @@ try {
     $uris = Share-UsbPrinters
     Write-PrinterList
     Register-SyncTask
+    try { Invoke-NetCheck } catch { }
     if ($uris) {
         Write-Host "Impressoras USB que aparecem no CUPS em Impressoras locais:"
         $uris | ForEach-Object { Write-Host $_ }

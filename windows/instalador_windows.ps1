@@ -851,6 +851,7 @@ Copy-Item $updateSrc (Join-Path $InstallDir "ncommerce-docker-update.bat") -Forc
 Copy-Item (Join-Path $Root "windows\refresh-host-ips.ps1") (Join-Path $InstallDir "refresh-host-ips.ps1") -Force
 Copy-Item (Join-Path $Root "windows\anydesk-id.ps1") (Join-Path $InstallDir "anydesk-id.ps1") -Force
 Copy-Item (Join-Path $Root "windows\usb-printers.ps1") (Join-Path $InstallDir "usb-printers.ps1") -Force
+Copy-Item (Join-Path $Root "windows\net-check.ps1") (Join-Path $InstallDir "net-check.ps1") -Force
 Copy-Item (Join-Path $Root "windows\update-host.ps1") (Join-Path $InstallDir "update-host.ps1") -Force
 Copy-Item (Join-Path $Root "docker\guard.sh") (Join-Path $InstallDir "guard.sh") -Force
 Copy-Item (Join-Path $Root "windows\rollback.bat") (Join-Path $InstallDir "rollback.bat") -Force
