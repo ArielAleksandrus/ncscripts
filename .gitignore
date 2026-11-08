@@ -1,0 +1,2 @@
+# Backups gerados pelo tools/backup_ubuntu.sh ficam fora do git.
+tools/ncommerce-backup-*.zip
