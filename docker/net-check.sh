@@ -13,7 +13,10 @@
 #   server      <interface> <ip> ok|conflict <MACs que tambem responderam por esse IP>
 #   neighbor    <ip> <mac> <fabricante>     (uma linha por resposta: dois MACs no mesmo IP = conflito)
 # A deteccao: o arp-scan pergunta "quem tem este IP?" como um aparelho sem IP (--arpspa 0.0.0.0).
-# Para o IP do proprio servidor, qualquer resposta e de outro aparelho.
+# Para o IP do proprio servidor, qualquer resposta de um MAC que nao e deste computador e de
+# outro aparelho. Os MACs deste computador ficam de fora: com cabo e Wi-Fi na mesma rede, o
+# Linux responde pelos dois IPs nas duas placas (arp_ignore=0), e isso nao e conflito.
+# Erros do arp-scan vao para o journal: journalctl -u ncommerce-net-check
 set -u
 
 if [ "${1:-}" = "--install" ]; then
@@ -63,8 +66,13 @@ command -v arp-scan >/dev/null 2>&1 || exit 0
 command -v ip >/dev/null 2>&1 || exit 0
 
 out="$(mktemp)"
-trap 'rm -f "$out"' EXIT
+err="$(mktemp)"
+trap 'rm -f "$out" "$err"' EXIT
 printf 'checked_at\t%s\n' "$(date -Iseconds)" > "$out"
+
+# MACs e IPs deste computador, em todas as placas.
+own_macs="$(cat /sys/class/net/*/address 2>/dev/null | tr 'A-F' 'a-f' | grep -v '^00:00:00:00:00:00$' | sort -u | paste -sd'|' -)"
+own_ips="$(ip -4 -o addr show 2>/dev/null | awk '{ split($4, a, "/"); print a[1] }' | sort -u | paste -sd'|' -)"
 
 # Interfaces da loja: com IPv4 global, ligadas e fisicas (sem Docker, VMware, VPN).
 ip -4 -o addr show scope global 2>/dev/null \
@@ -73,18 +81,26 @@ ip -4 -o addr show scope global 2>/dev/null \
   | while read -r iface addr; do
       [ -n "$addr" ] || continue
       # Outro aparelho respondendo pelo IP deste servidor.
-      others="$(timeout 15 arp-scan -I "$iface" --arpspa=0.0.0.0 --retry=3 --plain "$addr" 2>/dev/null \
-        | awk -F'\t' -v ip="$addr" '$1 == ip { print $2 }' | sort -u | paste -sd, -)"
+      others="$(timeout 15 arp-scan -I "$iface" --arpspa=0.0.0.0 --retry=3 --plain "$addr" </dev/null 2>>"$err" \
+        | awk -F'\t' -v ip="$addr" -v own="^($own_macs)$" '$1 == ip && tolower($2) !~ own { print tolower($2) }' \
+        | sort -u | paste -sd, -)"
       if [ -n "$others" ]; then
         printf 'server\t%s\t%s\tconflict\t%s\n' "$iface" "$addr" "$others" >> "$out"
       else
         printf 'server\t%s\t%s\tok\t\n' "$iface" "$addr" >> "$out"
       fi
       # A rede inteira: cada resposta vira uma linha. arp-scan ja diz o fabricante pelo MAC.
-      timeout 40 arp-scan -I "$iface" --localnet --retry=2 --plain 2>/dev/null \
-        | awk -F'\t' '$1 ~ /^[0-9]+(\.[0-9]+){3}$/ && $2 ~ /:/ { printf "neighbor\t%s\t%s\t%s\n", $1, tolower($2), $3 }' \
+      timeout 40 arp-scan -I "$iface" --localnet --retry=2 --plain </dev/null 2>>"$err" \
+        | awk -F'\t' -v own="^($own_macs)$" -v ownip="^($own_ips)$" \
+            '$1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && $2 ~ /:/ && tolower($2) !~ own && $1 !~ ownip {
+               printf "neighbor\t%s\t%s\t%s\n", $1, tolower($2), $3 }' \
         | sort -u >> "$out"
     done
+
+if [ -s "$err" ]; then
+  echo "arp-scan avisou:" >&2
+  sort -u "$err" | head -n 20 >&2
+fi
 
 mkdir -p "$DIR/host"
 install -m 644 "$out" "$DIR/host/.net_check.tmp" && mv -f "$DIR/host/.net_check.tmp" "$DIR/host/net_check"
