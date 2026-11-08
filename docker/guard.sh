@@ -107,7 +107,7 @@ version_name() {
   v="$(docker image inspect -f '{{index .Config.Labels "ncommerce.version"}}' "$1" 2>/dev/null)"
   case "$v" in ""|"<no value>"|dev)
     v="$(docker image inspect -f '{{range .RepoTags}}{{println .}}{{end}}' "$1" 2>/dev/null \
-      | sed -n 's/.*:\([0-9]\{4\}\.[0-9][0-9]\.[0-9][0-9]-[0-9a-f]\{7,\}\)$/\1/p' | head -n 1)"
+      | sed -n 's/.*:\([0-9]\{4\}\.[0-9][0-9]\.[0-9][0-9]-[0-9a-f]\{7,\}\(-[0-9a-f]\{7,\}\)\{0,1\}\)$/\1/p' | head -n 1)"
     ;;
   esac
   if [ -z "$v" ]; then
