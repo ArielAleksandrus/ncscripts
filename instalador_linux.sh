@@ -29,7 +29,7 @@ done
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 INSTALL_DIR="${NCOMMERCE_INSTALL_DIR:-/opt/ncommerce}"
-MASTER_URL="${NCOMMERCE_MASTER_URL:-https://ncommerce.app:3001}"
+MASTER_URL="${NCOMMERCE_MASTER_URL:-https://api.ncommerce.app}"
 REQUESTED_REGISTRY="${NCOMMERCE_REGISTRY:-}"
 REQUESTED_TAG="${NCOMMERCE_TAG:-}"
 
@@ -676,7 +676,7 @@ fi
 
 file_registry="$(read_env_key "$INSTALL_DIR/.env" NCOMMERCE_REGISTRY)"
 file_tag="$(read_env_key "$INSTALL_DIR/.env" NCOMMERCE_TAG)"
-REGISTRY="${REQUESTED_REGISTRY:-${file_registry:-${REGISTRY_FROM_MASTER:-ncommerce.app:5050}}}"
+REGISTRY="${REQUESTED_REGISTRY:-${file_registry:-${REGISTRY_FROM_MASTER:-registry.ncommerce.app:5050}}}"
 TAG="${REQUESTED_TAG:-${file_tag:-latest}}"
 
 prepare_plugins_dir

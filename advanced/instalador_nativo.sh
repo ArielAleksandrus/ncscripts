@@ -83,7 +83,7 @@ KEY_FILE="$PROGRESS_DIR/git-read-key"
 # Senha do acesso nao supervisionado do AnyDesk, igual em todas as lojas. Vem no resgate do
 # codigo e e apagada assim que o AnyDesk e instalado.
 ANYDESK_PASSWORD_FILE="$PROGRESS_DIR/anydesk-password"
-MASTER_URL="${NCOMMERCE_MASTER_URL:-https://ncommerce.app:3001}"
+MASTER_URL="${NCOMMERCE_MASTER_URL:-https://api.ncommerce.app}"
 
 read_install_code() {
   local raw code
@@ -542,7 +542,7 @@ else
 
   # -f: se o servidor responder erro (token errado etc.), aborta em vez de gravar a página de erro
   # no nginx/.env. Baixa tudo antes de instalar qualquer arquivo.
-  SETUP_URL="https://ncommerce.app:3001/setup"
+  SETUP_URL="https://api.ncommerce.app/setup"
   curl -fsS "$SETUP_URL/nginx_back/$LINUX_USER?token=$TOKEN" -o /tmp/ncommerce-api
   curl -fsS "$SETUP_URL/nginx_front/$LINUX_USER?token=$TOKEN" -o /tmp/ncommerce
   curl -fsS "$SETUP_URL/env/$LINUX_USER?token=$TOKEN" -o /tmp/ncommerce-env

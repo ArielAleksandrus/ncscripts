@@ -20,7 +20,7 @@ $TaskName = "NCommerce Docker Startup"
 if ($env:NCOMMERCE_MASTER_URL) {
     $MasterUrl = $env:NCOMMERCE_MASTER_URL
 } else {
-    $MasterUrl = "https://ncommerce.app:3001"
+    $MasterUrl = "https://api.ncommerce.app"
 }
 $DockerExe = Join-Path $env:ProgramFiles "Docker\Docker\resources\bin\docker.exe"
 $DockerDesktop = Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"
@@ -862,7 +862,7 @@ $PluginsDir = Initialize-PluginsDir
 $envFile = Join-Path $InstallDir ".env"
 $registry = $env:NCOMMERCE_REGISTRY
 if (-not $registry) { $registry = [string]$grant.registry }
-if (-not $registry) { $registry = Read-EnvValue $envFile "NCOMMERCE_REGISTRY" "ncommerce.app:5050" }
+if (-not $registry) { $registry = Read-EnvValue $envFile "NCOMMERCE_REGISTRY" "registry.ncommerce.app:5050" }
 $tag = $env:NCOMMERCE_TAG
 if (-not $tag) { $tag = Read-EnvValue $envFile "NCOMMERCE_TAG" "latest" }
 $envBody = "CUPS_PORT=$cupsPort`nNCOMMERCE_REGISTRY=$registry`nNCOMMERCE_TAG=$tag`nNCOMMERCE_PLUGINS_DIR=$($PluginsDir.Replace('\', '/'))`nTZ=$(Get-IanaTimeZone)`n"

@@ -53,6 +53,8 @@ rem Uma troca de versao (servico guard) deixa NCOMMERCE_TAG=keep-VERSAO no .env.
 rem Atualizar volta para a versao publicada. So o pull: no logon a versao trocada fica.
 if /I "%~1"=="pull" (
   powershell -NoProfile -Command "$f='%DIR%\.env'; $t=[IO.File]::ReadAllText($f) -replace '(?m)^NCOMMERCE_TAG=keep-[^\r\n]*','NCOMMERCE_TAG=latest'; [IO.File]::WriteAllText($f,$t)"
+  rem Endereco novo do registry e do mestre: api e registry.ncommerce.app. So avisa se falhar.
+  if exist "%DIR%\migrate-endpoints.ps1" powershell -NoProfile -ExecutionPolicy Bypass -File "%DIR%\migrate-endpoints.ps1" "%DIR%"
   "%DOCKER%" compose pull
   if errorlevel 1 exit /b 1
 )

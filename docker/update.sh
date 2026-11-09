@@ -51,6 +51,64 @@ fi
 sudo sed -i 's/^NCOMMERCE_TAG=keep-.*/NCOMMERCE_TAG=latest/' "$INSTALL_DIR/.env"
 sudo mkdir -p "$INSTALL_DIR/control"
 
+# O mestre e o registry ganharam nomes proprios: api.ncommerce.app e
+# registry.ncommerce.app:5050. Com o proxy da Cloudflare ligado em ncommerce.app,
+# as portas 3001 e 5050 desse nome param de responder.
+OLD_REGISTRY=ncommerce.app:5050
+NEW_REGISTRY=registry.ncommerce.app:5050
+
+# Usuario e senha do registry antigo, do jeito que o docker login gravou.
+registry_credentials() {
+  sudo python3 - "$1" <<'PY'
+import base64, json, subprocess, sys
+host = sys.argv[1]
+try:
+    conf = json.load(open("/root/.docker/config.json"))
+except Exception:
+    sys.exit(1)
+for key, value in conf.get("auths", {}).items():
+    if key.split("://")[-1].rstrip("/") == host and value.get("auth"):
+        print(base64.b64decode(value["auth"]).decode())
+        sys.exit(0)
+store = conf.get("credHelpers", {}).get(host) or conf.get("credsStore")
+if store:
+    out = subprocess.run(["docker-credential-" + store, "get"], input=host, capture_output=True, text=True)
+    if out.returncode == 0:
+        data = json.loads(out.stdout)
+        print(data["Username"] + ":" + data["Secret"])
+        sys.exit(0)
+sys.exit(1)
+PY
+}
+
+migrate_registry() {
+  local creds
+  grep -qx "NCOMMERCE_REGISTRY=$OLD_REGISTRY" .env || return 0
+  if ! creds="$(registry_credentials "$OLD_REGISTRY")" || [ -z "$creds" ]; then
+    echo "Nao achei o login de $OLD_REGISTRY. Sigo com ele."
+    return 0
+  fi
+  if printf '%s' "${creds#*:}" | sudo docker login "$NEW_REGISTRY" --username "${creds%%:*}" --password-stdin >/dev/null 2>&1; then
+    sudo sed -i "s/^NCOMMERCE_REGISTRY=$OLD_REGISTRY\$/NCOMMERCE_REGISTRY=$NEW_REGISTRY/" .env
+    echo "Registry trocado para $NEW_REGISTRY."
+  else
+    echo "Nao consegui entrar em $NEW_REGISTRY. Sigo com $OLD_REGISTRY."
+  fi
+}
+
+# O endereco do mestre fica no volume api_env (/env/.env.production). Vale a partir
+# do proximo reinicio da api; o endereco antigo segue no ar enquanto isso.
+migrate_master_url() {
+  [ -n "$(sudo docker compose ps -q api 2>/dev/null)" ] || return 0
+  sudo docker compose exec -T api sh -c \
+    "grep -q '^NCOMMERCE_SERVER_URL=.*ncommerce\.app:3001' /env/.env.production 2>/dev/null || exit 0
+     sed -i '/^NCOMMERCE_SERVER_URL=/s#https://ncommerce\.app:3001#https://api.ncommerce.app#' /env/.env.production
+     echo 'Mestre trocado para https://api.ncommerce.app.'" || true
+}
+
+migrate_registry
+migrate_master_url
+
 sudo docker compose pull
 sudo docker compose up -d
 
@@ -60,7 +118,7 @@ wait_verdict() {
   [ -n "$(sudo docker compose ps -q guard 2>/dev/null)" ] || return 0
   reg="$(sed -n 's/^NCOMMERCE_REGISTRY=//p' .env | tail -n 1)"
   tag="$(sed -n 's/^NCOMMERCE_TAG=//p' .env | tail -n 1)"
-  new_img="$(sudo docker image inspect -f '{{.Id}}' "${reg:-ncommerce.app:5050}/ncommerce/api:${tag:-latest}" 2>/dev/null || true)"
+  new_img="$(sudo docker image inspect -f '{{.Id}}' "${reg:-registry.ncommerce.app:5050}/ncommerce/api:${tag:-latest}" 2>/dev/null || true)"
   name=""
   echo
   echo "Conferindo a versao nova (ate $((WAIT_S / 60)) minutos). Pode fechar: a conferencia continua sozinha."

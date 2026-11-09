@@ -41,7 +41,7 @@ env_value() {
 fetch() {
   local registry token tag manifest layer digest media blob
   registry="${NCOMMERCE_REGISTRY:-$(env_value NCOMMERCE_REGISTRY)}"
-  registry="${registry:-ncommerce.app:5050}"
+  registry="${registry:-registry.ncommerce.app:5050}"
   token="${NCOMMERCE_TOKEN:-$(env_value NCOMMERCE_SERVER_TOKEN)}"
   tag="${NCOMMERCE_TAG:-latest}"
   if [ -z "$token" ]; then

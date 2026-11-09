@@ -78,7 +78,7 @@ setup_compose() {
     ln -s "$D" "$HOSTDIR"
   fi
   REG="$(env_get NCOMMERCE_REGISTRY "$D/.env")"
-  REG="${REG:-ncommerce.app:5050}"
+  REG="${REG:-registry.ncommerce.app:5050}"
 }
 
 dc() {

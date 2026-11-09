@@ -31,7 +31,7 @@ services:
       retries: 20
 
   api:
-    image: ${NCOMMERCE_REGISTRY:-ncommerce.app:5050}/ncommerce/api:${NCOMMERCE_TAG:-latest}
+    image: ${NCOMMERCE_REGISTRY:-registry.ncommerce.app:5050}/ncommerce/api:${NCOMMERCE_TAG:-latest}
     restart: unless-stopped
     depends_on:
       mysql:
@@ -93,7 +93,7 @@ services:
       - ./control:/control
 
   web:
-    image: ${NCOMMERCE_REGISTRY:-ncommerce.app:5050}/ncommerce/web:${NCOMMERCE_TAG:-latest}
+    image: ${NCOMMERCE_REGISTRY:-registry.ncommerce.app:5050}/ncommerce/web:${NCOMMERCE_TAG:-latest}
     restart: unless-stopped
     ports:
       - "4200:4200"

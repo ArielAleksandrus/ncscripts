@@ -39,6 +39,7 @@ try {
         @{ From = "windows\anydesk-id.ps1";             To = "anydesk-id.ps1" },
         @{ From = "windows\usb-printers.ps1";           To = "usb-printers.ps1" },
         @{ From = "windows\net-check.ps1";             To = "net-check.ps1" },
+        @{ From = "windows\migrate-endpoints.ps1";     To = "migrate-endpoints.ps1" },
         @{ From = "windows\update-host.ps1";            To = "update-host.ps1" },
         @{ From = "docker\guard.sh";                    To = "guard.sh" },
         @{ From = "windows\rollback.bat";               To = "rollback.bat" },
