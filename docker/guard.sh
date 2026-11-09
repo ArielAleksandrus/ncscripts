@@ -79,6 +79,19 @@ setup_compose() {
   fi
   REG="$(env_get NCOMMERCE_REGISTRY "$D/.env")"
   REG="${REG:-registry.ncommerce.app:5050}"
+  retag_old_registry
+}
+
+# O registry era ncommerce.app:5050. As versoes guardadas antes da troca ficaram
+# com esse nome; com o nome novo a volta de versao continua achando elas.
+retag_old_registry() {
+  old=ncommerce.app:5050
+  [ "$REG" != "$old" ] || return 0
+  docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null \
+    | grep -E "^$old/ncommerce/(api|web):keep-" \
+    | while read -r img; do
+        docker tag "$img" "$REG/${img#$old/}" 2>/dev/null
+      done
 }
 
 dc() {

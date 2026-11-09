@@ -91,6 +91,8 @@ migrate_registry() {
   if printf '%s' "${creds#*:}" | sudo docker login "$NEW_REGISTRY" --username "${creds%%:*}" --password-stdin >/dev/null 2>&1; then
     sudo sed -i "s/^NCOMMERCE_REGISTRY=$OLD_REGISTRY\$/NCOMMERCE_REGISTRY=$NEW_REGISTRY/" .env
     echo "Registry trocado para $NEW_REGISTRY."
+    # A guarda le o registry so ao ligar, e ao ligar renomeia as versoes guardadas.
+    sudo docker compose restart guard >/dev/null 2>&1 || true
   else
     echo "Nao consegui entrar em $NEW_REGISTRY. Sigo com $OLD_REGISTRY."
   fi

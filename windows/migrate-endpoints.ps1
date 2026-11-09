@@ -64,6 +64,10 @@ try {
             $text = $text -replace "(?m)^NCOMMERCE_REGISTRY=$([regex]::Escape($OldRegistry))(\r?)$", "NCOMMERCE_REGISTRY=$NewRegistry`$1"
             [IO.File]::WriteAllText($envFile, $text)
             Write-Host "Registry trocado para $NewRegistry."
+            # A guarda le o registry so ao ligar, e ao ligar renomeia as versoes guardadas.
+            Push-Location $InstallDir
+            & $DockerExe compose restart guard 2>$null | Out-Null
+            Pop-Location
         } else {
             Write-Host "Nao consegui entrar em $NewRegistry. Sigo com $OldRegistry."
         }
