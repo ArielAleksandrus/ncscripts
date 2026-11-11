@@ -7,7 +7,7 @@ set -uo pipefail
 
 INSTALL_DIR="${1:-/opt/ncommerce}"
 URL="https://github.com/ArielAleksandrus/ncscripts/archive/refs/heads/master.tar.gz"
-FILES="docker-compose.yml docker-compose.usb.yml update.sh update-host.sh host-ips.sh anydesk-id.sh guard.sh rollback.sh net-check.sh"
+FILES="docker-compose.yml docker-compose.usb.yml update.sh update-host.sh host-ips.sh anydesk-id.sh guard.sh rollback.sh net-check.sh tunnel-route.sh"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT

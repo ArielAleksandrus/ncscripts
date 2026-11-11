@@ -46,6 +46,10 @@ fi
 if [ -x "$INSTALL_DIR/net-check.sh" ] && [ ! -f /etc/systemd/system/ncommerce-net-check.timer ]; then
   sudo "$INSTALL_DIR/net-check.sh" --install "$INSTALL_DIR" || true
 fi
+# Lojas antigas ganham o timer que troca a rota do tunel se a interface cair.
+if [ -x "$INSTALL_DIR/tunnel-route.sh" ] && [ ! -f /etc/systemd/system/ncommerce-tunnel-route.timer ]; then
+  sudo "$INSTALL_DIR/tunnel-route.sh" --install "$INSTALL_DIR" || true
+fi
 
 # Uma troca de versao (guard) deixa NCOMMERCE_TAG=keep-<versao>. Atualizar volta para a publicada.
 sudo sed -i 's/^NCOMMERCE_TAG=keep-.*/NCOMMERCE_TAG=latest/' "$INSTALL_DIR/.env"

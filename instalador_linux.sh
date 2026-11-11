@@ -689,12 +689,15 @@ sudo cp "$ROOT/docker/update-host.sh" "$INSTALL_DIR/update-host.sh"
 sudo cp "$ROOT/docker/guard.sh" "$INSTALL_DIR/guard.sh"
 sudo cp "$ROOT/docker/rollback.sh" "$INSTALL_DIR/rollback.sh"
 sudo cp "$ROOT/docker/net-check.sh" "$INSTALL_DIR/net-check.sh"
+sudo cp "$ROOT/docker/tunnel-route.sh" "$INSTALL_DIR/tunnel-route.sh"
 sudo chmod 755 "$INSTALL_DIR/update.sh" "$INSTALL_DIR/update-host.sh" "$INSTALL_DIR/guard.sh" "$INSTALL_DIR/rollback.sh" \
-  "$INSTALL_DIR/net-check.sh"
+  "$INSTALL_DIR/net-check.sh" "$INSTALL_DIR/tunnel-route.sh"
 sudo mkdir -p "$INSTALL_DIR/control"
 install_anydesk_id_service
 # Conflito de IP na rede da loja, para o chat de suporte (host/net_check).
 sudo "$INSTALL_DIR/net-check.sh" --install "$INSTALL_DIR" || true
+# Rota do tunel pela interface que chega em tunnel.nlabs.live.
+sudo "$INSTALL_DIR/tunnel-route.sh" --install "$INSTALL_DIR" || true
 sudo tee "$INSTALL_DIR/.env" >/dev/null <<EOF
 CUPS_PORT=${CUPS_PORT}
 NCOMMERCE_REGISTRY=${REGISTRY}
