@@ -1,0 +1,9 @@
+#!/bin/sh
+echo "mysql $*" >> /fake/calls.log
+case "$*" in
+  *" -e "*) exit 0 ;;
+esac
+s="$(cat /fake/knobs/mysql_sleep 2>/dev/null)"; [ -z "$s" ] || sleep "$s"
+[ ! -e /fake/knobs/mysql_fail ] || exit 1
+cat >> /fake/state/db_import.sql
+echo "-- import done" >> /fake/state/db_imports

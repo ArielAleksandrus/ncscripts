@@ -1,0 +1,4 @@
+#!/bin/sh
+echo "journalctl $*" >> /fake/calls.log
+[ "journalctl" = gpg ] && cat
+exit 0

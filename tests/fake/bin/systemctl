@@ -1,0 +1,8 @@
+#!/bin/sh
+echo "systemctl $*" >> /fake/calls.log
+case "$1" in
+  is-enabled) [ -e /fake/knobs/docker_not_enabled ] && { echo disabled; exit 1; }; echo enabled ;;
+  is-active) echo active ;;
+  list-unit-files) exit 0 ;;
+esac
+exit 0

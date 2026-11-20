@@ -1,0 +1,3 @@
+#!/bin/sh
+case "$1" in show) echo America/Sao_Paulo ;; esac
+exit 0

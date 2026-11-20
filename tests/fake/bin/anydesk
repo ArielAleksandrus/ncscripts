@@ -1,0 +1,6 @@
+#!/bin/sh
+case "$1" in
+  --get-id) echo 123456789 ;;
+  --set-password) cat > /dev/null; echo set > /fake/state/anydesk_password ;;
+esac
+exit 0

@@ -1,0 +1,7 @@
+#!/bin/sh
+echo "apt-get $*" >> /fake/calls.log
+n="$(cat /fake/knobs/apt_fail 2>/dev/null)"
+case "$n" in ""|0) exit 0 ;; esac
+echo $((n - 1)) > /fake/knobs/apt_fail
+echo "E: Could not get lock" >&2
+exit 100

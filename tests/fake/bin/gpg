@@ -1,0 +1,4 @@
+#!/bin/sh
+echo "gpg $*" >> /fake/calls.log
+[ "gpg" = gpg ] && cat
+exit 0

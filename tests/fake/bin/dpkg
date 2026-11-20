@@ -1,0 +1,6 @@
+#!/bin/sh
+echo "dpkg $*" >> /fake/calls.log
+case "$1" in
+  --audit) [ -e /fake/knobs/dpkg_broken ] && { echo "The following packages are only half configured"; rm -f /fake/knobs/dpkg_broken; }; exit 0 ;;
+esac
+exit 0

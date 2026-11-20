@@ -1,0 +1,187 @@
+#!/bin/sh
+# Docker de mentira para os testes. Guarda "imagens" e "containers" em arquivos
+# de /fake/state e obedece aos arquivos de /fake/knobs (falhar, demorar etc.).
+S=/fake/state
+K=/fake/knobs
+mkdir -p "$S/images" "$S/containers" "$K"
+echo "docker $*" >> /fake/calls.log
+
+knob() { cat "$K/$1" 2>/dev/null; }
+# Consome uma unidade de um knob numerico. 0 = consumiu (deve falhar/agir).
+take() {
+  n="$(knob "$1")"
+  case "$n" in ""|*[!0-9]*|0) return 1 ;; esac
+  echo $((n - 1)) > "$K/$1"
+  return 0
+}
+ref_file() { echo "$S/images/$(echo "$1" | tr '/:' '__')"; }
+env_of() { sed -n "s/^$1=//p" .env 2>/dev/null | tail -n 1; }
+services="mysql redis api web guard"
+
+image_for() {
+  reg="$(env_of NCOMMERCE_REGISTRY)"; reg="${reg:-registry.ncommerce.app:5050}"
+  tag="${NCOMMERCE_TAG:-$(env_of NCOMMERCE_TAG)}"; tag="${tag:-latest}"
+  case "$1" in
+    api|web) echo "$reg/ncommerce/$1:$tag" ;;
+    mysql) echo mysql:8.0 ;;
+    redis) echo redis:7-alpine ;;
+    guard) echo docker:27.5.1-cli ;;
+  esac
+}
+
+if [ -e "$K/daemon_down" ]; then
+  case "$1 ${2:-}" in
+    "compose version") ;;
+    *) echo "Cannot connect to the Docker daemon" >&2; exit 1 ;;
+  esac
+fi
+
+case "$1" in
+  info) exit 0 ;;
+  version) echo "27.0.0" ;;
+  login)
+    cat > /dev/null
+    [ ! -e "$K/login_fail" ] || { echo "denied" >&2; exit 1; }
+    echo "$2" > "$S/login"
+    echo "Login Succeeded"
+    ;;
+  image)
+    shift; [ "$1" = inspect ] && shift
+    fmt=""; [ "$1" = "-f" ] && { fmt="$2"; shift 2; }
+    f="$(ref_file "$1")"
+    if [ ! -f "$f" ]; then
+      # tambem aceita o ID direto
+      grep -rlx "$1" "$S/images" >/dev/null 2>&1 || exit 1
+      [ -z "$fmt" ] || echo "$1"
+      exit 0
+    fi
+    [ -z "$fmt" ] || cat "$f"
+    ;;
+  images) for f in "$S"/images/*; do [ -e "$f" ] && basename "$f"; done ;;
+  tag)
+    src="$2"; dst="$3"
+    if [ -f "$(ref_file "$src")" ]; then id="$(cat "$(ref_file "$src")")"; else id="$src"; fi
+    echo "$id" > "$(ref_file "$dst")"
+    ;;
+  rmi) rm -f "$(ref_file "$2")" ;;
+  volume) [ -f /env/.env.production ] && echo ncommerce_api_env; exit 0 ;;
+  start)
+    shift
+    for c in "$@"; do [ -f "$S/containers/$c" ] && echo running > "$S/containers/$c.status"; done
+    ;;
+  ps)
+    # docker ps -aq --filter label=...project=X --filter label=...service=Y
+    svc="$(echo "$*" | sed -n 's/.*compose\.service=\([a-z]*\).*/\1/p')"
+    [ -f "$S/containers/$svc" ] && echo "$svc"
+    exit 0
+    ;;
+  inspect)
+    fmt="$3"; cid="$4"
+    [ -n "$cid" ] || exit 1
+    case "$fmt" in
+      *RestartPolicy*) [ -f "$S/containers/$cid" ] || exit 1; echo "unless-stopped" ;;
+      *State.Status*) cat "$S/containers/$cid.status" 2>/dev/null || exit 1 ;;
+      *State.Running*) [ "$(cat "$S/containers/$cid.status" 2>/dev/null)" = running ] && echo true || echo false ;;
+      *RestartCount*) knob "restart_count_$cid" | grep . || echo 0 ;;
+      *StartedAt*|*Created*) knob "started_$cid" | grep . || echo "2020-01-01T00:00:00.000000000Z" ;;
+      *compose.project*) echo ncommerce ;;
+      *Mounts*) echo "" ;;
+      *Image*) cat "$S/containers/$cid" 2>/dev/null || exit 1 ;;
+      *) exit 1 ;;
+    esac
+    ;;
+  run)
+    # token no volume parado, ou ultima migration de uma imagem
+    case "$*" in
+      *db/migrate*)
+        for a in "$@"; do case "$a" in sha256:*) knob "migration_$(echo "$a" | tr ':' '_')" ;; esac; done
+        ;;
+      *) grep -q "^NCOMMERCE_SERVER_TOKEN=..*" /env/.env.production 2>/dev/null ;;
+    esac
+    ;;
+  compose)
+    shift
+    while :; do
+      case "$1" in
+        -f|-p|--project-directory) shift 2 ;;
+        *) break ;;
+      esac
+    done
+    sub="$1"; shift
+    case "$sub" in
+      version) [ "${1:-}" = "--short" ] && echo "2.27.0" || echo "Docker Compose version v2.27.0" ;;
+      config)
+        [ ! -e "$K/config_fail" ] || { echo "compose file invalid" >&2; exit 1; }
+        if [ "${1:-}" = "--images" ]; then for s in $services; do image_for "$s"; done; fi
+        ;;
+      pull)
+        s="$(knob pull_sleep)"; [ -z "$s" ] || sleep "$s"
+        if take pull_fail; then echo "pull: network unreachable" >&2; exit 1; fi
+        api_new="$(knob published_api)"; api_new="${api_new:-sha256:api1}"
+        web_new="$(knob published_web)"; web_new="${web_new:-sha256:web1}"
+        want="${*:-$services}"
+        for svc in $want; do
+          case "$svc" in
+            api) echo "$api_new" > "$(ref_file "$(image_for api)")"
+                 # knob pull_partial: api baixa, o resto falha
+                 if take pull_partial; then echo "pull web: connection reset" >&2; exit 1; fi ;;
+            web) echo "$web_new" > "$(ref_file "$(image_for web)")" ;;
+            *) echo "sha256:$svc" > "$(ref_file "$(image_for "$svc")")" ;;
+          esac
+        done
+        echo "pulled $want"
+        ;;
+      up)
+        s="$(knob up_sleep)"; [ -z "$s" ] || sleep "$s"
+        if take up_fail; then echo "up: port is already allocated" >&2; exit 1; fi
+        norecreate=0; only=""
+        for a in "$@"; do
+          case "$a" in --no-recreate) norecreate=1 ;; -d|--no-deps) ;; *) only="$only $a" ;; esac
+        done
+        for svc in ${only:-$services}; do
+          img="$(image_for "$svc")"
+          id="$(cat "$(ref_file "$img")" 2>/dev/null)"
+          [ -n "$id" ] || { id="sha256:$svc"; echo "$id" > "$(ref_file "$img")"; }
+          if [ "$norecreate" = 1 ] && [ -f "$S/containers/$svc" ]; then continue; fi
+          echo "$id" > "$S/containers/$svc"
+          echo running > "$S/containers/$svc.status"
+        done
+        if [ ! -e "$K/api_never_starts" ] && command -v python3 >/dev/null 2>&1; then
+          if ! (ss -ltn 2>/dev/null | grep -q ':3000 '); then
+            (python3 /repo/tests/fake/server.py api >/dev/null 2>&1 8>&- &)
+            sleep 1
+          fi
+        fi
+        echo "up ok"
+        ;;
+      ps)
+        case "$*" in
+          *--services*) for svc in $services; do [ "$(cat "$S/containers/$svc.status" 2>/dev/null)" = running ] && echo "$svc"; done ;;
+          *-aq*|*-qa*|"-a -q"*)
+            svc=""; for a in "$@"; do case "$a" in -*) ;; *) svc="$a" ;; esac; done
+            for c in ${svc:-$services}; do [ -f "$S/containers/$c" ] && echo "$c"; done ;;
+          *-q*)
+            svc=""; for a in "$@"; do case "$a" in -*|running) ;; *) svc="$a" ;; esac; done
+            for c in ${svc:-$services}; do [ "$(cat "$S/containers/$c.status" 2>/dev/null)" = running ] && echo "$c"; done ;;
+          *) for svc in $services; do echo "$svc $(cat "$S/containers/$svc.status" 2>/dev/null)"; done ;;
+        esac
+        exit 0
+        ;;
+      exec)
+        [ "$1" = "-T" ] && shift
+        svc="$1"; shift
+        [ "$(cat "$S/containers/$svc.status" 2>/dev/null)" = running ] || { echo "service $svc is not running" >&2; exit 1; }
+        MYSQL_ROOT_PASSWORD=ncommerce_root "$@"
+        ;;
+      cp)
+        src="$(echo "$1" | sed 's/^[a-z]*://')"; dst="$(echo "$2" | sed 's/^[a-z]*://')"
+        if take cp_fail; then echo "cp failed" >&2; exit 1; fi
+        mkdir -p "$(dirname "$dst")" 2>/dev/null
+        cp -a "$src" "$dst"
+        ;;
+      restart|logs|images|stop) exit 0 ;;
+      *) echo "fake docker compose: $sub nao implementado" >&2; exit 64 ;;
+    esac
+    ;;
+  *) echo "fake docker: $1 nao implementado" >&2; exit 64 ;;
+esac

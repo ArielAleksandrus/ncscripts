@@ -1,0 +1,6 @@
+#!/bin/sh
+echo "mysqldump $*" >> /fake/calls.log
+[ ! -e /fake/knobs/dump_fail ] || exit 2
+for a in "$@"; do
+  case "$a" in --result-file=*) printf -- '-- fake dump\n-- Dump completed on 2026-01-01\n' > "${a#--result-file=}" ;; esac
+done

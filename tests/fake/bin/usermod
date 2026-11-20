@@ -1,0 +1,4 @@
+#!/bin/sh
+echo "usermod $*" >> /fake/calls.log
+[ "usermod" = gpg ] && cat
+exit 0
