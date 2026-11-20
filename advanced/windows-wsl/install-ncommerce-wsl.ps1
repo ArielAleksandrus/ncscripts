@@ -220,6 +220,48 @@ if ($null -eq $virtEnabled) {
     Write-Host "Could not read firmware virtualization flag; continuing (WSL will fail later if it is really off)." -ForegroundColor Yellow
 }
 
+# A tunneled SSH session goes quiet during a long command. Without a probe,
+# NAT drops the TCP. A probe every 30s keeps a live session up; 3 misses
+# (~90s with no answer) disconnect it.
+function Set-SshClientAlive {
+    $config = Join-Path $env:ProgramData "ssh\sshd_config"
+    if (-not (Test-Path $config)) {
+        Write-Host "No $config. SSH keepalive was not set."
+        return
+    }
+    $raw = [System.IO.File]::ReadAllText($config)
+    if ($raw -match '(?m)^ClientAliveInterval\s+30\s*$' -and $raw -match '(?m)^ClientAliveCountMax\s+3\s*$') {
+        Write-Host "SSH already probes the client every 30s."
+        return
+    }
+    $updated = $raw
+    $updated = [regex]::Replace($updated, '(?m)^[ \t]*#?[ \t]*ClientAliveInterval[ \t]+\S+.*$', 'ClientAliveInterval 30')
+    $updated = [regex]::Replace($updated, '(?m)^[ \t]*#?[ \t]*ClientAliveCountMax[ \t]+\S+.*$', 'ClientAliveCountMax 3')
+    $nl = "`n"
+    if ($updated.Contains("`r`n")) { $nl = "`r`n" }
+    if ($updated -notmatch '(?m)^ClientAliveInterval\s+') {
+        $updated = $updated.TrimEnd() + $nl + "ClientAliveInterval 30" + $nl + "ClientAliveCountMax 3" + $nl
+    } elseif ($updated -notmatch '(?m)^ClientAliveCountMax\s+') {
+        $updated = $updated.TrimEnd() + $nl + "ClientAliveCountMax 3" + $nl
+    }
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($config, $updated, $utf8)
+    $sshd = Join-Path $env:Windir "System32\OpenSSH\sshd.exe"
+    & $sshd -t
+    if ($LASTEXITCODE -ne 0) {
+        [System.IO.File]::WriteAllText($config, $raw, $utf8)
+        Write-Host "sshd rejected the keepalive. Previous configuration restored."
+        return
+    }
+    try {
+        Restart-Service sshd -ErrorAction Stop
+    } catch {
+        Write-Host "Keepalive saved, but sshd did not restart: $($_.Exception.Message)"
+        return
+    }
+    Write-Host "SSH probes the client every 30s. A live session no longer drops from silence."
+}
+
 function Enable-OpenSshServer {
     Write-Host "Opening SSH on port 22..."
     try {
@@ -241,6 +283,7 @@ function Enable-OpenSshServer {
         } else {
             Set-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -Enabled True -Action Allow
         }
+        Set-SshClientAlive
         Write-Host "Windows SSH is listening on port 22."
     } catch {
         Write-Host "Could not start SSH: $($_.Exception.Message)"

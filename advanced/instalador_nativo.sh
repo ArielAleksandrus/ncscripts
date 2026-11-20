@@ -66,6 +66,22 @@ enable_ssh() {
     sudo ufw allow 80/tcp >/dev/null || true
     sudo ufw allow 443/tcp >/dev/null || true
   fi
+  # Sessao pelo tunel fica em silencio num comando longo. Sem probe o NAT
+  # derruba o TCP. Probe a cada 30s: a sessao viva nao expira; 3 falhas
+  # seguidas (~90s sem resposta) desconectam.
+  sudo mkdir -p /etc/ssh/sshd_config.d
+  sudo tee /etc/ssh/sshd_config.d/ncommerce-keepalive.conf >/dev/null <<'EOF'
+ClientAliveInterval 30
+ClientAliveCountMax 3
+EOF
+  if ! sudo grep -qE '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf[[:space:]]*$' /etc/ssh/sshd_config; then
+    sudo sed -i '1i Include /etc/ssh/sshd_config.d/*.conf' /etc/ssh/sshd_config
+  fi
+  if ! sudo sshd -t; then
+    echo "sshd rejeitou o keepalive."
+    exit 1
+  fi
+  sudo systemctl reload ssh 2>/dev/null || sudo systemctl reload ssh.service 2>/dev/null || true
   echo "SSH na porta 22. Usuario: ${LINUX_USER}."
 }
 enable_ssh
