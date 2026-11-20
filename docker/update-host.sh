@@ -26,7 +26,7 @@ if ! curl -fsSL --retry 2 --connect-timeout 15 --max-time 180 -o "$work/ncscript
    || ! tar -xzf "$work/ncscripts.tar.gz" -C "$work" 2>/dev/null; then
   keep_going "Nao consegui atualizar os scripts do NCommerce."
 fi
-src="$(find "$work" -mindepth 2 -maxdepth 2 -type d -name docker | head -n 1)"
+src="$(find "$work" -mindepth 2 -maxdepth 2 -type d -name docker | sed -n '1p')"
 if [ -z "$src" ] || [ ! -f "$src/docker-compose.yml" ]; then
   keep_going "O pacote do GitHub veio sem docker/docker-compose.yml."
 fi

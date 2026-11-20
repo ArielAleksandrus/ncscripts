@@ -93,7 +93,7 @@ env_set() {
 
 container_image() {
   local cid
-  cid="$(compose ps -aq "$1" 2>/dev/null | head -n 1)"
+  cid="$(compose ps -aq "$1" 2>/dev/null | sed -n '1p')"
   [ -n "$cid" ] || return 0
   sudo docker inspect -f '{{.Image}}' "$cid" 2>/dev/null || true
 }
@@ -392,9 +392,9 @@ wait_verdict() {
   echo
   echo "Conferindo a versao nova (ate $((WAIT_S / 60)) minutos). Pode fechar: a conferencia continua sozinha."
   for ((i = 0; i < WAIT_S; i += 10)); do
-    cid="$(compose ps -aq api 2>/dev/null | head -n 1)"
+    cid="$(compose ps -aq api 2>/dev/null | sed -n '1p')"
     img="$(sudo docker inspect -f '{{.Image}}' "$cid" 2>/dev/null || true)"
-    line="$(grep "^[^|]*|$img|" control/versions.txt 2>/dev/null | head -n 1 || true)"
+    line="$(grep "^[^|]*|$img|" control/versions.txt 2>/dev/null | sed -n '1p' || true)"
     name="$(echo "$line" | cut -d'|' -f1)"
     state="$(echo "$line" | cut -d'|' -f5)"
     if [ -n "$new_img" ] && [ -n "$img" ] && [ "$img" != "$new_img" ]; then

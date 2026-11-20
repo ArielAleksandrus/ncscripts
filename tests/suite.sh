@@ -157,6 +157,7 @@ if want instalar; then
   t "instalar: loja que voltou de versao (keep-) continua nela"
   sed -i 's/^NCOMMERCE_TAG=.*/NCOMMERCE_TAG=keep-2026.01.01-abc1234/' /opt/ncommerce/.env
   echo sha256:apiold > "/fake/state/images/127.0.0.1_5050_ncommerce_api_keep-2026.01.01-abc1234"
+  echo sha256:webold > "/fake/state/images/127.0.0.1_5050_ncommerce_web_keep-2026.01.01-abc1234"
   : > /fake/calls.log
   run_installer
   check "sai com 0" [ "$RC" = "0" ]

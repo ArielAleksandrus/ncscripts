@@ -315,12 +315,15 @@ clear_resume_trigger() {
 }
 
 port_busy() {
-  ss -ltn 2>/dev/null | grep -Eq ":$1([^0-9]|$)"
+  # A saida inteira primeiro: com pipefail, um grep -q que sai cedo derrubaria o ss.
+  local listening
+  listening="$(ss -ltn 2>/dev/null || true)"
+  grep -Eq ":$1([^0-9]|$)" <<< "$listening"
 }
 
 # Nome do programa que escuta na porta (precisa de root para ver o dos outros).
 port_owner() {
-  sudo ss -ltnp 2>/dev/null | grep -E ":$1[[:space:]]" | sed -n 's/.*users:(("\([^"]*\)".*/\1/p' | head -n 1
+  sudo ss -ltnp 2>/dev/null | grep -E ":$1[[:space:]]" | sed -n 's/.*users:(("\([^"]*\)".*/\1/p' | sed -n '1p'
 }
 
 compose() { sudo docker compose "$@"; }
@@ -383,7 +386,7 @@ token_on_stopped_volume() {
   local project volume image
   project="$(basename "$INSTALL_DIR" | tr '[:upper:]' '[:lower:]')"
   volume="$(sudo docker volume ls -q --filter "label=com.docker.compose.project=$project" \
-    --filter "label=com.docker.compose.volume=api_env" 2>/dev/null | head -n 1)"
+    --filter "label=com.docker.compose.volume=api_env" 2>/dev/null | sed -n '1p')"
   [ -n "$volume" ] || return 1
   for image in redis:7-alpine docker:27.5.1-cli mysql:8.0; do
     if sudo docker image inspect "$image" >/dev/null 2>&1; then
@@ -838,7 +841,7 @@ enable_ssh() {
   else
     sudo systemctl reload ssh 2>/dev/null || sudo systemctl reload ssh.service 2>/dev/null || true
   fi
-  if ss -ltn | grep -Eq ':22[[:space:]]'; then
+  if port_busy 22; then
     echo "SSH escutando na porta 22. Usuario: ${USER}."
   else
     warn "a porta 22 (SSH) nao esta escutando. O suporte fica sem acesso por SSH ate isso ser resolvido."
@@ -1643,7 +1646,7 @@ verify_install() {
     warn "o Docker nao ficou marcado para ligar junto com o computador. Depois de reiniciar, a loja pode nao subir sozinha: chame o suporte."
   fi
   for svc in mysql redis api web guard; do
-    cid="$(compose ps -q "$svc" 2>/dev/null | head -n 1)"
+    cid="$(compose ps -q "$svc" 2>/dev/null | sed -n '1p')"
     policy="$(sudo docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$cid" 2>/dev/null || true)"
     case "$policy" in
       unless-stopped|always) ;;

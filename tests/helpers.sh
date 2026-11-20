@@ -16,7 +16,7 @@ CURRENT=""
 wait_port() {
   local i
   for i in $(seq 1 50); do
-    if ss -ltn | grep -q ":$1 "; then return 0; fi
+    if grep -q ":$1 " <<< "$(/usr/bin/ss -ltn)"; then return 0; fi
     sleep 0.1
   done
   echo "porta $1 nao abriu" >&2
