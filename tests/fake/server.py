@@ -7,7 +7,7 @@
 
 Os arquivos de /fake/knobs mudam o comportamento (ver cada handler).
 """
-import json, os, ssl, sys, threading
+import json, os, socket, ssl, sys, threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 KNOBS = "/fake/knobs"
@@ -96,7 +96,8 @@ class Master(Quiet):
             os.remove(os.path.join(KNOBS, "backup_cut"))
             self.wfile.write(chunk[: int(cut)])
             self.wfile.flush()
-            self.connection.close()
+            self.close_connection = True
+            self.connection.shutdown(socket.SHUT_RDWR)
             return
         self.wfile.write(chunk)
 

@@ -53,6 +53,9 @@ LOG_DIR="$HOME/ncommerce-logs"
 AUTOSTART_FILE="$HOME/.config/autostart/ncommerce-instalador.desktop"
 RESUME_SCRIPT="$STATE_DIR/retomar-instalacao.sh"
 MAX_AUTO_RESUMES=3
+# Esperas, em segundos. Mudam por variavel de ambiente nos testes.
+RETRY_WAIT_S="${NCOMMERCE_RETRY_WAIT_S:-15}"
+API_WAIT_S="${NCOMMERCE_API_WAIT_S:-480}"
 
 if [ "$(id -u)" -eq 0 ]; then
   echo "Rode sem sudo. Exemplo: ./instalador_linux.sh"
@@ -1191,7 +1194,7 @@ pull_images() {
   esac
 
   # Reparo: so baixa o que falta. A versao da loja muda no Atualizar NCommerce.
-  if [ "$MODE" = "reparo" ] && [ "${#services[@]}" -eq 0 ]; then
+  if [ "$MODE" = "reparo" ]; then
     local img images absent=0
     images="$(compose config --images 2>/dev/null || true)"
     while IFS= read -r img; do
@@ -1206,7 +1209,7 @@ pull_images() {
 
   echo "Baixando o NCommerce. E a parte mais demorada: de 5 a 30 minutos, conforme a internet."
   echo "Se a internet cair, o que ja foi baixado fica guardado."
-  if ! retry 4 15 compose pull "${services[@]+"${services[@]}"}"; then
+  if ! retry 4 "$RETRY_WAIT_S" compose pull "${services[@]+"${services[@]}"}"; then
     fail "o download do NCommerce nao terminou (internet caiu ou esta muito lenta)." \
       "confira a internet e rode o instalador de novo. Ele continua do ponto em que o download parou."
   fi
@@ -1254,12 +1257,12 @@ start_stack() {
     STORE_ALREADY_LIVE=1
   fi
   echo "Esperando o sistema responder. Na primeira vez ele prepara o banco de dados: ate 8 minutos."
-  if ! wait_api_up 480; then
+  if ! wait_api_up "$API_WAIT_S"; then
     # Sem token a API ja responde ao setup; se nem isso, algo nao subiu.
     if ! token_already_on_volume 3; then
       compose ps || true
       compose logs --tail 60 api || true
-      fail "o NCommerce foi ligado mas nao respondeu em 8 minutos." \
+      fail "o NCommerce foi ligado mas nao respondeu em $((API_WAIT_S / 60)) minutos." \
         "rode o instalador de novo. Se repetir, mande o log para o suporte NCommerce."
     fi
     echo "A API ainda nao respondeu, mas o token desta maquina ja esta gravado. Sigo."

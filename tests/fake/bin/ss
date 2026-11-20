@@ -1,0 +1,6 @@
+#!/bin/sh
+# ss de verdade, mais o SSH "escutando" na 22 (o teste nao roda como root).
+/usr/bin/ss "$@"
+case "$*" in
+  *-ltn*) [ -e /fake/knobs/no_ssh ] || echo "LISTEN 0      128          0.0.0.0:22        0.0.0.0:*" ;;
+esac

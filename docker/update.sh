@@ -13,6 +13,7 @@ set -euo pipefail
 
 INSTALL_DIR="${NCOMMERCE_INSTALL_DIR:-/opt/ncommerce}"
 WAIT_S="${NCOMMERCE_UPDATE_WAIT_S:-390}"
+RETRY_WAIT_S="${NCOMMERCE_RETRY_WAIT_S:-15}"
 STATE_DIR="$HOME/.ncommerce-docker"
 LOG_DIR="$HOME/ncommerce-logs"
 UPDATE_STATE="$INSTALL_DIR/control/update.state"
@@ -328,8 +329,8 @@ pulled=0
 for attempt in 1 2 3; do
   if sudo NCOMMERCE_TAG=latest docker compose pull; then pulled=1; break; fi
   if [ "$attempt" -lt 3 ]; then
-    echo "O download parou (tentativa $attempt de 3). Tentando de novo em $((attempt * 15)) segundos..."
-    sleep $((attempt * 15))
+    echo "O download parou (tentativa $attempt de 3). Tentando de novo em $((attempt * RETRY_WAIT_S)) segundos..."
+    sleep $((attempt * RETRY_WAIT_S))
   fi
 done
 if [ "$pulled" -ne 1 ]; then
