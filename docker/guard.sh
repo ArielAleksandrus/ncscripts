@@ -12,6 +12,10 @@
 # - Troca de versao pedida pela tela (Configuracoes > Empresa) ou pelo terminal
 #   (rollback.sh / rollback.bat), com o arquivo control/request.
 # - Avisa o mestre de cada troca. O mestre manda no maximo um WhatsApp por loja por dia.
+# - Religa mysql, redis, api ou web que ficaram parados ou sumiram por 1 minuto
+#   (atualizacao interrompida no meio, janela fechada, queda de energia). Para
+#   parar um container de proposito sem a guarda religar: crie control/pausa.
+# - Quando este arquivo e trocado por uma atualizacao, a guarda passa a rodar o novo.
 #
 # Arquivos em control/ (a api le em /control):
 #   versions.txt   nome|api_id|web_id|visto_em|estado(new/good/bad)|ultima_migration
@@ -20,6 +24,8 @@
 #   request.result id|ok ou erro|mensagem
 #   events.txt     epoch|tipo|de|para|motivo   (ultimos 20)
 #   alert-pending  aviso ainda nao entregue ao mestre
+#   update.state   fase|epoch|api_antiga|web_antiga|tag   (update.sh / atualizacao do Windows em andamento)
+#   pausa          se existir, a guarda nao religa container parado
 #
 # Uso dentro do container (o rollback.sh do host chama estes):
 #   guard.sh            laco da guarda
@@ -37,6 +43,9 @@ NEW_WINDOW_S="${GUARD_NEW_WINDOW_S:-86400}"
 CRASH_N="${GUARD_CRASH_N:-3}"
 CRASH_WINDOW_S="${GUARD_CRASH_WINDOW_S:-900}"
 NO_ANSWER_S="${GUARD_NO_ANSWER_S:-600}"
+HEAL_TICKS="${GUARD_HEAL_TICKS:-3}"
+UPDATE_GRACE_S="${GUARD_UPDATE_GRACE_S:-1200}"
+DOWN_TICKS=0
 DB="$C/versions.txt"
 
 mkdir -p "$C"
@@ -46,12 +55,10 @@ log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*"; }
 now() { date +%s; }
 
 env_get() { sed -n "s/^$1=//p" "$2" 2>/dev/null | tail -n 1 | tr -d '\r' | sed "s/^[\"']//; s/[\"']\$//"; }
+# O .env e trocado inteiro com mv: uma queda de energia deixa o antigo ou o novo.
 env_set() {
-  if grep -q "^$1=" "$D/.env"; then
-    sed -i "s|^$1=.*|$1=$2|" "$D/.env"
-  else
-    printf '%s=%s\n' "$1" "$2" >> "$D/.env"
-  fi
+  { grep -v "^$1=" "$D/.env"; printf '%s=%s\n' "$1" "$2"; } > "$D/.env.guard.tmp" \
+    && mv -f "$D/.env.guard.tmp" "$D/.env"
 }
 
 # "2026-11-06T15:21:24.809152556Z" -> epoch
@@ -244,8 +251,12 @@ switch_to() {
     docker tag "$(field "$line" 3)" "$REG/ncommerce/web:keep-$to" 2>/dev/null
   fi
   log "Trocando de ${from:-?} para $to ($kind, $reason)."
+  prev_tag="$(env_get NCOMMERCE_TAG "$D/.env")"
   env_set NCOMMERCE_TAG "keep-$to"
   if ! dc up -d --no-deps api web; then
+    # A troca nao aconteceu: o .env volta a dizer a versao que esta rodando.
+    env_set NCOMMERCE_TAG "${prev_tag:-latest}"
+    dc up -d --no-deps api web >/dev/null 2>&1
     echo "O docker compose nao conseguiu subir a versao $to."
     return 1
   fi
@@ -299,9 +310,76 @@ crash_alerted_today() {
   [ "$(cat "$C/crash-alert-day" 2>/dev/null)" = "$(date +%Y-%m-%d)" ]
 }
 
+# Atualizacao em andamento (update.sh / Windows): fase e idade em segundos.
+update_phase() { cut -d'|' -f1 "$C/update.state" 2>/dev/null; }
+update_age() {
+  at="$(cut -d'|' -f2 "$C/update.state" 2>/dev/null)"
+  case "$at" in ""|*[!0-9]*) echo 999999 ;; *) echo $(($(now) - at)) ;; esac
+}
+
+# Um container parado ou que sumiu deixa a loja fora do ar ate alguem rodar o
+# compose: acontece quando a troca de versao e interrompida no meio. Depois de
+# HEAL_TICKS voltas seguidas assim, a guarda religa. Container reiniciando
+# (restarting) nao entra aqui: disso cuida a volta de versao.
+heal() {
+  [ ! -e "$C/pausa" ] || { DOWN_TICKS=0; return 0; }
+  phase="$(update_phase)"
+  if [ "$phase" = "up" ] && [ "$(update_age)" -lt "$UPDATE_GRACE_S" ]; then
+    DOWN_TICKS=0
+    return 0
+  fi
+  stopped=""; absent=""
+  for svc in mysql redis api web; do
+    c="$(service_cid "$svc")"
+    if [ -z "$c" ]; then
+      absent="$absent $svc"
+      continue
+    fi
+    case "$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null)" in
+      exited|created|dead) stopped="$stopped $c" ;;
+    esac
+  done
+  if [ -z "$stopped" ] && [ -z "$absent" ]; then
+    DOWN_TICKS=0
+    # Troca que terminou sem apagar o arquivo (janela fechada no ultimo segundo).
+    if [ "$phase" = "up" ]; then rm -f "$C/update.state"; fi
+    return 0
+  fi
+  DOWN_TICKS=$((DOWN_TICKS + 1))
+  [ "$DOWN_TICKS" -ge "$HEAL_TICKS" ] || return 0
+  DOWN_TICKS=0
+  if [ "$phase" = "up" ]; then
+    # A versao nova ja estava baixada inteira: termina a troca.
+    log "Atualizacao interrompida no meio da troca. Terminando de ligar."
+    dc up -d && rm -f "$C/update.state"
+    return 0
+  fi
+  log "Container parado ou faltando (parados:${stopped:- nenhum}; faltando:${absent:- nenhum}). Religando."
+  for c in $stopped; do
+    docker start "$c" >/dev/null 2>&1
+  done
+  # Sem recriar o que existe: uma atualizacao que esta baixando nao entra pela metade.
+  if [ -n "$absent" ]; then dc up -d --no-recreate; fi
+}
+
+# Uma atualizacao troca este arquivo. A guarda passa para o novo sem esperar o
+# computador reiniciar, se ele passar na conferencia de sintaxe.
+SELF_SUM="$(cksum < "$D/guard.sh" 2>/dev/null)"
+reload_if_changed() {
+  sum="$(cksum < "$D/guard.sh" 2>/dev/null)"
+  [ -n "$sum" ] && [ "$sum" != "$SELF_SUM" ] || return 0
+  if sh -n "$D/guard.sh" 2>/dev/null; then
+    log "guard.sh foi atualizado. Recarregando."
+    exec sh "$D/guard.sh"
+  fi
+  # Arquivo novo com erro: segue com o que esta na memoria e nao confere de novo ate mudar.
+  SELF_SUM="$sum"
+}
+
 tick() {
   process_request
   send_alert
+  heal
   cid="$(service_cid api)"
   [ -n "$cid" ] || return 0
   img="$(image_of "$cid")"
@@ -423,4 +501,5 @@ while true; do
   tick
   write_json
   sleep "$LOOP_S"
+  reload_if_changed
 done
