@@ -21,7 +21,7 @@ A primeira execucao do run-windows.sh precisa de internet (monta a imagem com
 Pester e PSScriptAnalyzer). Os testes nunca usam o Docker de verdade da maquina
 (o docker dentro do container e o de mentira de tests/fake/bin).
 
-Ultima rodada (2026-11-20, noite): Linux 261 conferencias + guarda 29, 0 erradas;
+Ultima rodada (2026-11-20, noite): Linux 259 conferencias + guarda 29, 0 erradas;
 Windows: analise 11 arquivos 0 problemas, Pester 77 testes, 0 falhas.
 
 ## Feito
