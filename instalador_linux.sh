@@ -85,6 +85,8 @@ INHIBIT_PID=""
 MODE="instalacao"
 STORE_ALREADY_LIVE=0
 NATIVE_STOPPED_NOW=0
+SNAP_TAKEN=0
+ROLLBACK_WAIT_S="${NCOMMERCE_ROLLBACK_WAIT_S:-180}"
 APT_UPDATED=0
 CODE=""
 NCOMMERCE_TOKEN=""
@@ -155,6 +157,107 @@ restore_native_after_failure() {
   fi
 }
 
+# ---- Volta ao estado anterior. Numa loja que ja funcionava, esta execucao
+# guarda antes (snapshot_live_store) o compose, o .env e as imagens em uso. Se
+# ela falhar e a loja ficar sem responder, tudo volta e a loja e religada.
+SNAP_DIR_NAME="antes-da-instalacao"
+
+snap_dir() { echo "$INSTALL_DIR/control/$SNAP_DIR_NAME"; }
+
+container_image() {
+  local cid
+  cid="$(cd "$INSTALL_DIR" && compose ps -aq "$1" 2>/dev/null | sed -n '1p')"
+  [ -n "$cid" ] || return 0
+  sudo docker inspect -f '{{.Image}}' "$cid" 2>/dev/null || true
+}
+
+# Uma copia de uma execucao anterior que nao terminou fica: ela e a da loja de
+# antes. Copia com mais de 2 dias nao serve mais (a loja pode ter sido atualizada).
+snapshot_live_store() {
+  local dir f
+  [ "$STORE_ALREADY_LIVE" = "1" ] || return 0
+  dir="$(snap_dir)"
+  if [ -n "$(sudo find "$dir/imagens" -mmin +2880 2>/dev/null)" ]; then sudo rm -rf "$dir"; fi
+  if sudo test -s "$dir/imagens"; then
+    SNAP_TAKEN=1
+    return 0
+  fi
+  sudo mkdir -p "$dir.tmp"
+  for f in docker-compose.yml docker-compose.usb.yml .env; do
+    if sudo test -f "$INSTALL_DIR/$f"; then sudo cp -p "$INSTALL_DIR/$f" "$dir.tmp/$f"; fi
+  done
+  printf '%s|%s|%s|%s\n' "$(container_image api)" "$(container_image web)" \
+    "$(env_read "$INSTALL_DIR/.env" NCOMMERCE_TAG)" "$(env_read "$INSTALL_DIR/.env" NCOMMERCE_REGISTRY)" \
+    | sudo tee "$dir.tmp/imagens" >/dev/null
+  sudo rm -rf "$dir"
+  sudo mv -f "$dir.tmp" "$dir"
+  SNAP_TAKEN=1
+}
+
+drop_snapshot() {
+  [ "$SNAP_TAKEN" = "1" ] || return 0
+  sudo rm -rf "$(snap_dir)" "$(snap_dir).tmp" 2>/dev/null || true
+  SNAP_TAKEN=0
+}
+
+# A etiqueta "latest" de api e web volta para as imagens de antes.
+restore_snapshot_tags() {
+  local api web tag reg
+  IFS='|' read -r api web tag reg < <(sudo cat "$(snap_dir)/imagens" 2>/dev/null || true)
+  reg="${reg:-$DEFAULT_REGISTRY}"
+  [ "${tag:-latest}" = "latest" ] || return 0
+  if [ -n "$api" ]; then sudo docker tag "$api" "$reg/ncommerce/api:latest" >/dev/null 2>&1 || true; fi
+  if [ -n "$web" ]; then sudo docker tag "$web" "$reg/ncommerce/web:latest" >/dev/null 2>&1 || true; fi
+}
+
+rollback_live_store() {
+  local dir f
+  [ "$SNAP_TAKEN" = "1" ] || return 0
+  if [ "$NC_SIGNAL" = "HUP" ]; then
+    echo "Se a loja nao abrir, rode o instalador de novo: ele termina ou volta a loja como estava."
+    return 0
+  fi
+  # Loja respondendo: nada a desfazer. A proxima execucao continua de onde parou.
+  if wait_api_up 10 2>/dev/null; then return 0; fi
+  dir="$(snap_dir)"
+  echo
+  echo "A loja nao esta respondendo. Voltando os arquivos e a versao de antes desta instalacao..."
+  for f in docker-compose.yml docker-compose.usb.yml .env; do
+    if sudo test -f "$dir/$f"; then
+      sudo cp -p "$dir/$f" "$INSTALL_DIR/.$f.volta" && sudo mv -f "$INSTALL_DIR/.$f.volta" "$INSTALL_DIR/$f"
+    fi
+  done
+  restore_snapshot_tags
+  if (cd "$INSTALL_DIR" && compose up -d) && wait_api_up "$ROLLBACK_WAIT_S"; then
+    drop_snapshot
+    echo "A LOJA VOLTOU PARA COMO ESTAVA ANTES DESTA INSTALACAO e esta respondendo."
+  else
+    echo "NAO consegui religar a loja como estava. Chame o suporte NCommerce agora."
+    echo "A copia dos arquivos de antes esta em $dir."
+  fi
+}
+
+# Uma atualizacao (update.sh) que morreu no download deixa a etiqueta "latest"
+# de api e web pela metade: volta para as imagens em uso antes de qualquer
+# compose up. A trava do instalador e a mesma do update.sh: nenhum esta rodando.
+recover_interrupted_update() {
+  local f="$INSTALL_DIR/control/update.state" phase api web tag reg
+  [ -f "$f" ] || return 0
+  IFS="|" read -r phase _ api web tag < "$f" || true
+  if [ "$phase" = "pull" ]; then
+    reg="$(env_read "$INSTALL_DIR/.env" NCOMMERCE_REGISTRY)"
+    reg="${reg:-$DEFAULT_REGISTRY}"
+    if [ "${tag:-latest}" = "latest" ]; then
+      if [ -n "$api" ]; then sudo docker tag "$api" "$reg/ncommerce/api:latest" >/dev/null 2>&1 || true; fi
+      if [ -n "$web" ]; then sudo docker tag "$web" "$reg/ncommerce/web:latest" >/dev/null 2>&1 || true; fi
+    fi
+    sudo rm -f "$f"
+    echo "Uma atualizacao foi interrompida durante o download. A loja continua na versao em que estava."
+  fi
+  # "up": a versao nova ja estava inteira no computador; o compose up desta
+  # instalacao termina a troca e a guarda limpa o arquivo.
+}
+
 on_exit() {
   local rc=$?
   trap - EXIT ERR INT TERM HUP
@@ -162,6 +265,7 @@ on_exit() {
   if [ "$NC_VERDICT" != "ok" ] && [ "$NC_VERDICT" != "quiet" ]; then
     if [ "$rc" -eq 0 ]; then rc=1; fi
     restore_native_after_failure
+    rollback_live_store
     print_failure "$rc"
   fi
   [ -n "$KEEPALIVE_PID" ] && kill "$KEEPALIVE_PID" 2>/dev/null
@@ -1218,10 +1322,37 @@ pull_images() {
   echo "Baixando o NCommerce. E a parte mais demorada: de 5 a 30 minutos, conforme a internet."
   echo "Se a internet cair, o que ja foi baixado fica guardado."
   if ! retry 4 "$RETRY_WAIT_S" compose pull "${services[@]+"${services[@]}"}"; then
+    # Loja que ja funcionava: a etiqueta "latest" volta para a versao em uso.
+    if [ "$SNAP_TAKEN" = "1" ]; then restore_snapshot_tags; fi
     fail "o download do NCommerce nao terminou (internet caiu ou esta muito lenta)." \
       "confira a internet e rode o instalador de novo. Ele continua do ponto em que o download parou."
   fi
   echo "Download concluido."
+  dump_if_new_version_changes_db
+}
+
+last_migration() {
+  sudo docker run --rm --network none --entrypoint sh "$1" -c \
+    'ls /app/ncommerce_api/db/migrate 2>/dev/null | sort | tail -n 1 | cut -c1-14' 2>/dev/null < /dev/null || true
+}
+
+# Loja que ja funcionava e baixou uma versao nova (--reinstalar, --backup): se
+# ela muda o banco, uma copia dele fica antes, como no update.sh.
+dump_if_new_version_changes_db() {
+  local old_api new_api old_mig new_mig
+  [ "$SNAP_TAKEN" = "1" ] || return 0
+  IFS='|' read -r old_api _ < <(sudo cat "$(snap_dir)/imagens" 2>/dev/null || true)
+  new_api="$(sudo docker image inspect -f '{{.Id}}' "${REGISTRY}/ncommerce/api:${TAG}" 2>/dev/null || true)"
+  [ -n "$old_api" ] && [ -n "$new_api" ] && [ "$old_api" != "$new_api" ] || return 0
+  old_mig="$(last_migration "$old_api")"
+  new_mig="$(last_migration "$new_api")"
+  [ -z "$old_mig" ] || [ "$old_mig" != "$new_mig" ] || return 0
+  echo "A versao baixada muda o banco de dados."
+  if ! dump_database antes-de-atualizar; then
+    restore_snapshot_tags
+    fail "nao consegui guardar uma copia do banco antes de trocar de versao." \
+      "nada foi trocado. Confira o espaco em disco e rode de novo, ou chame o suporte NCommerce."
+  fi
 }
 
 # ============================================================ etapa 8
@@ -1728,6 +1859,8 @@ ensure_docker
 state_done docker
 
 step 6 "Arquivos e servicos do NCommerce"
+recover_interrupted_update
+snapshot_live_store
 install_store_files
 state_done arquivos
 
@@ -1754,6 +1887,7 @@ state_set concluida "$(date +%s)"
 state_unset codigo || true
 state_unset backup_escolha || true
 clear_resume_trigger
+drop_snapshot
 
 print_success
 NC_VERDICT="ok"

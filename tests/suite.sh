@@ -646,4 +646,69 @@ EOS
   rm -rf /tmp/fakecurl
 fi
 
+# ------------------------------------------------- volta ao estado anterior
+
+if want volta; then
+  t "volta: reparo com compose novo que nao liga volta os arquivos e religa"
+  installed_store
+  cp /opt/ncommerce/docker-compose.yml /tmp/compose-antes.yml
+  echo "# compose-novo" >> "$SRC/docker/docker-compose.yml"
+  knob up_fail 2; knob api_down; knob up_heals_api
+  NCOMMERCE_ROLLBACK_WAIT_S=10 run_installer
+  check "falha" [ "$RC" != "0" ]
+  check "avisa e volta" out_has "Voltando os arquivos e a versao de antes" && out_has "A LOJA VOLTOU PARA COMO ESTAVA"
+  check "compose de antes no lugar" cmp -s /tmp/compose-antes.yml /opt/ncommerce/docker-compose.yml
+  check "religou depois de voltar" [ "$(grep -c '^docker compose up' /fake/calls.log)" -ge 3 ]
+  check "copia de antes apagada" [ ! -e /opt/ncommerce/control/antes-da-instalacao ]
+  unknob up_heals_api
+
+  t "volta: loja que segue respondendo nao e desfeita"
+  installed_store
+  echo "# compose-novo" >> "$SRC/docker/docker-compose.yml"
+  knob up_fail 2
+  run_installer
+  check "falha sem voltar" [ "$RC" != "0" ] && out_lacks "Voltando os arquivos"
+  check "copia de antes fica para a proxima" [ -s /opt/ncommerce/control/antes-da-instalacao/imagens ]
+  run_installer
+  check "rodar de novo termina e apaga a copia" [ "$RC" = "0" ] && [ ! -e /opt/ncommerce/control/antes-da-instalacao ]
+
+  t "volta: --reinstalar com versao nova que nao liga volta a versao em uso"
+  installed_store
+  code_file
+  knob published_api sha256:api2; knob published_web sha256:web2
+  knob migration_sha256_api1 20260101000000; knob migration_sha256_api2 20260101000000
+  knob up_fail 2; knob api_down; knob up_heals_api; knob no_backup
+  NCOMMERCE_ROLLBACK_WAIT_S=10 run_installer --reinstalar
+  check "falha e volta" [ "$RC" != "0" ] && out_has "A LOJA VOLTOU PARA COMO ESTAVA"
+  check "latest volta para a versao de antes" [ "$(api_latest)" = "sha256:api1" ] && [ "$(web_latest)" = "sha256:web1" ]
+  check "versao de antes rodando" [ "$(running_api)" = "sha256:api1" ]
+  unknob up_heals_api
+
+  t "volta: --reinstalar com download cortado nao mexe na loja"
+  installed_store
+  code_file
+  knob published_api sha256:api2; knob published_web sha256:web2; knob pull_partial 9; knob no_backup
+  run_installer --reinstalar
+  check "falha" [ "$RC" != "0" ]
+  check "latest volta para a versao em uso" [ "$(api_latest)" = "sha256:api1" ]
+  check "nada recriado" [ "$(running_api)" = "sha256:api1" ]
+
+  t "volta: --reinstalar com versao que muda o banco guarda copia antes"
+  installed_store
+  code_file
+  knob published_api sha256:api3; knob migration_sha256_api1 20260101000000; knob migration_sha256_api3 20260202000000; knob no_backup
+  run_installer --reinstalar
+  check "termina" [ "$RC" = "0" ]
+  check "copia guardada antes do up" bash -c 'ls /opt/ncommerce/backups/antes-de-atualizar-*.sql.gz >/dev/null 2>&1'
+
+  t "volta: atualizacao morta no download e desfeita pelo instalador"
+  installed_store
+  printf 'pull|1|sha256:api1|sha256:web1|latest\n' > /opt/ncommerce/control/update.state
+  echo sha256:api2 > /fake/state/images/127.0.0.1_5050_ncommerce_api_latest
+  run_installer
+  check "termina" [ "$RC" = "0" ] && out_has "interrompida durante o download"
+  check "latest de volta" [ "$(api_latest)" = "sha256:api1" ] && [ "$(running_api)" = "sha256:api1" ]
+  check "estado limpo" [ ! -e /opt/ncommerce/control/update.state ]
+fi
+
 summary

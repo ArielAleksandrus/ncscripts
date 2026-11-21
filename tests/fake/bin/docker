@@ -152,6 +152,8 @@ case "$1" in
             sleep 1
           fi
         fi
+        # knob up_heals_api: a api volta a responder depois de um up que deu certo.
+        [ ! -e "$K/up_heals_api" ] || rm -f "$K/api_down"
         echo "up ok"
         ;;
       ps)

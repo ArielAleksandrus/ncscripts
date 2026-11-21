@@ -381,6 +381,8 @@ if ! compose up -d; then
   fi
 fi
 clear_update_state
+# A copia que o instalador guarda para voltar a loja ficou velha.
+sudo rm -rf "$INSTALL_DIR/control/antes-da-instalacao" 2>/dev/null || true
 PHASE="conferindo"
 
 # Espera o guard: a versao fica "good" depois de 5 minutos respondendo.
