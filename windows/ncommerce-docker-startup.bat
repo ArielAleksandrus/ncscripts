@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 rem Sobe o Docker Desktop, se precisar, e religa a stack. Sem pull.
 rem A tarefa "NCommerce Docker Startup" chama este arquivo no logon.
 rem A janela fica aberta enquanto o Docker sobe. O aviso sai antes dessa espera.
@@ -42,22 +42,44 @@ exit /b 1
 
 :ready
 cd /d "%DIR%"
+if not exist "%DIR%\control" mkdir "%DIR%\control"
+if /I "%~1"=="pull" goto pull
+rem Atualizacao que parou no meio (janela fechada, queda de energia): o
+rem ncommerce-update.ps1 desfaz o download pela metade antes de ligar, para a
+rem loja nao subir com api de uma versao e web de outra. Codigo 2: uma
+rem atualizacao esta rodando agora, e ela mesma liga a loja.
+if exist "%DIR%\ncommerce-update.ps1" (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%DIR%\ncommerce-update.ps1" -Recuperar
+  if errorlevel 2 (
+    echo Uma atualizacao do NCommerce esta rodando em outra janela. Ela liga o sistema quando terminar.
+    exit /b 0
+  )
+)
 if exist "%DIR%\refresh-host-ips.ps1" (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%DIR%\refresh-host-ips.ps1" "%DIR%"
 )
 if exist "%DIR%\anydesk-id.ps1" (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%DIR%\anydesk-id.ps1" "%DIR%"
 )
-if not exist "%DIR%\control" mkdir "%DIR%\control"
-rem Uma troca de versao (servico guard) deixa NCOMMERCE_TAG=keep-VERSAO no .env.
-rem Atualizar volta para a versao publicada. So o pull: no logon a versao trocada fica.
-if /I "%~1"=="pull" (
-  powershell -NoProfile -Command "$f='%DIR%\.env'; $t=[IO.File]::ReadAllText($f) -replace '(?m)^NCOMMERCE_TAG=keep-[^\r\n]*','NCOMMERCE_TAG=latest'; [IO.File]::WriteAllText($f,$t)"
-  rem Endereco novo do registry e do mestre: api e registry.ncommerce.app. So avisa se falhar.
-  if exist "%DIR%\migrate-endpoints.ps1" powershell -NoProfile -ExecutionPolicy Bypass -File "%DIR%\migrate-endpoints.ps1" "%DIR%"
-  "%DOCKER%" compose pull
-  if errorlevel 1 exit /b 1
-)
 echo Ligando os programas do NCommerce...
 "%DOCKER%" compose up -d
 exit /b %ERRORLEVEL%
+
+:pull
+rem "pull" vem do atalho Atualizar NCommerce antigo. A atualizacao de verdade e o
+rem ncommerce-update.ps1. Tudo num bloco so: o cmd le o bloco inteiro antes de
+rem rodar, e o update-host.ps1 pode trocar este arquivo no meio.
+(
+  if not exist "%DIR%\ncommerce-update.ps1" if exist "%DIR%\update-host.ps1" powershell -NoProfile -ExecutionPolicy Bypass -File "%DIR%\update-host.ps1" "%DIR%"
+  if exist "%DIR%\ncommerce-update.ps1" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%DIR%\ncommerce-update.ps1" -SemScripts
+    exit /b !ERRORLEVEL!
+  )
+  rem Sem o ncommerce-update.ps1 (pacote antigo): o jeito antigo.
+  powershell -NoProfile -Command "$f='%DIR%\.env'; $t=[IO.File]::ReadAllText($f) -replace '(?m)^NCOMMERCE_TAG=keep-[^\r\n]*','NCOMMERCE_TAG=latest'; [IO.File]::WriteAllText($f,$t)"
+  if exist "%DIR%\migrate-endpoints.ps1" powershell -NoProfile -ExecutionPolicy Bypass -File "%DIR%\migrate-endpoints.ps1" "%DIR%"
+  "%DOCKER%" compose pull
+  if errorlevel 1 exit /b 1
+  "%DOCKER%" compose up -d
+  exit /b !ERRORLEVEL!
+)
