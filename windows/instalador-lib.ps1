@@ -505,3 +505,175 @@ function Restore-NcConsole {
         }
     } catch { }
 }
+
+# ------------------------------------------------------------------- docker
+# As funcoes abaixo usam $DockerExe e $InstallDir de quem faz o `. instalador-lib.ps1`.
+
+# docker compose exec, com o console aberto, espera EOF no stdin e nao volta.
+function Invoke-ComposeExec {
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$ArgList)
+    $parts = foreach ($a in $ArgList) {
+        if ($a -match '[\s"]') { '"' + ($a.Replace('"', '\"')) + '"' } else { $a }
+    }
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $DockerExe
+    $psi.Arguments = ((@("compose") + $parts) -join " ")
+    $psi.WorkingDirectory = $InstallDir
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    $proc.StandardInput.Close()
+    $out = $proc.StandardOutput.ReadToEnd()
+    $proc.WaitForExit()
+    $global:LASTEXITCODE = $proc.ExitCode
+    return $out
+}
+
+# docker compose <args> na pasta da loja, com a saida na tela e no log.
+function Invoke-Compose {
+    param([string[]]$Arguments, [switch]$Quiet)
+    Push-Location $InstallDir
+    try {
+        return (Invoke-Native -Exe $DockerExe -Arguments (@("compose") + $Arguments) -Quiet:$Quiet)
+    } finally {
+        Pop-Location
+    }
+}
+
+# Saida de um comando do docker, sem mostrar. Vazio quando falha.
+function Get-DockerText([string[]]$Arguments) {
+    $ErrorActionPreference = "Continue"
+    Push-Location $InstallDir
+    try {
+        $out = & $DockerExe @Arguments 2>$null
+        if ($LASTEXITCODE -ne 0) { return "" }
+        return ("$(@($out) -join "`n")").Trim()
+    } catch {
+        return ""
+    } finally {
+        Pop-Location
+    }
+}
+
+function Test-DockerUp {
+    $ErrorActionPreference = "Continue"
+    try { & $DockerExe info *> $null } catch { return $false }
+    return ($LASTEXITCODE -eq 0)
+}
+
+# ID da imagem do container de um servico (api, web); vazio sem container.
+function Get-ServiceImage([string]$Service) {
+    $cid = @((Get-DockerText @("compose", "ps", "-aq", $Service)) -split "`n" | Where-Object { $_ })[0]
+    if (-not $cid) { return "" }
+    return (Get-DockerText @("inspect", "-f", "{{.Image}}", $cid))
+}
+
+function Get-ImageId([string]$Image) {
+    return (Get-DockerText @("image", "inspect", "-f", "{{.Id}}", $Image))
+}
+
+# Confere um .gz lendo ate o fim: arquivo cortado (disco cheio, queda) falha.
+function Test-GzipFile([string]$Path) {
+    $fs = $null
+    try {
+        $fs = [System.IO.File]::OpenRead($Path)
+        $gz = New-Object System.IO.Compression.GZipStream($fs, [System.IO.Compression.CompressionMode]::Decompress)
+        $buf = New-Object byte[] 65536
+        while ($gz.Read($buf, 0, $buf.Length) -gt 0) { }
+        return $true
+    } catch {
+        return $false
+    } finally {
+        if ($fs) { $fs.Dispose() }
+    }
+}
+
+# Copia do banco antes de mexer nele (restaurar backup, versao nova que muda as
+# tabelas). Fica em <loja>\backups, as 3 mais recentes de cada tipo.
+function Save-DatabaseDump([string]$Label) {
+    $dir = Join-Path $InstallDir "backups"
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $name = "{0}-{1}.sql.gz" -f $Label, (Get-Date -Format "yyyyMMdd-HHmmss")
+    Say "Guardando uma copia do banco de dados atual..."
+    $ErrorActionPreference = "Continue"
+    # Sem pipe: o codigo de saida do mysqldump e a ultima linha ("Dump completed") valem.
+    $dump = 'rm -f /tmp/ncommerce-dump.sql /tmp/ncommerce-dump.sql.gz; mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction --quick --routines --no-tablespaces --result-file=/tmp/ncommerce-dump.sql ncommerce_api_production 2>/dev/null && tail -c 300 /tmp/ncommerce-dump.sql | grep -q "Dump completed" && gzip -f /tmp/ncommerce-dump.sql'
+    Invoke-ComposeExec exec -T mysql sh -c $dump | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Invoke-ComposeExec exec -T mysql rm -f /tmp/ncommerce-dump.sql /tmp/ncommerce-dump.sql.gz | Out-Null
+        return $false
+    }
+    $part = Join-Path $dir "$name.part"
+    $code = Invoke-Compose -Arguments @("cp", "mysql:/tmp/ncommerce-dump.sql.gz", $part) -Quiet
+    Invoke-ComposeExec exec -T mysql rm -f /tmp/ncommerce-dump.sql.gz | Out-Null
+    if ($code -ne 0 -or (Get-NcFileLength $part) -lt 20 -or -not (Test-GzipFile $part)) {
+        Remove-Item -LiteralPath $part -Force -ErrorAction SilentlyContinue
+        return $false
+    }
+    [System.IO.File]::Move($part, (Join-Path $dir $name))
+    Get-ChildItem -LiteralPath $dir -Filter "$Label-*.sql.gz" | Sort-Object LastWriteTime -Descending |
+        Select-Object -Skip 3 | Remove-Item -Force -ErrorAction SilentlyContinue
+    Say "Copia guardada em $(Join-Path $dir $name)."
+    return $true
+}
+
+# ----------------------------------------------- atualizacao em andamento
+# control\update.state: fase|epoch|api_antiga|web_antiga|tag, o mesmo formato do
+# update.sh do Linux. A guarda le a fase: "up" (troca em andamento) ela nao
+# atropela e, se ficar velha, termina de ligar.
+
+function Get-UpdateStatePath { return (Join-Path $InstallDir "control\update.state") }
+
+function Write-UpdateState([string]$Phase, [string]$OldApi, [string]$OldWeb, [string]$PrevTag) {
+    $path = Get-UpdateStatePath
+    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $path)) | Out-Null
+    $line = "{0}|{1}|{2}|{3}|{4}`n" -f $Phase, [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(), $OldApi, $OldWeb, $PrevTag
+    Write-FileAtomic $path $line
+}
+
+# $null sem atualizacao pendente (ou arquivo estragado).
+function Read-UpdateState {
+    $path = Get-UpdateStatePath
+    if (-not [System.IO.File]::Exists($path)) { return $null }
+    try {
+        $f = ([System.IO.File]::ReadAllText($path).Trim()) -split '\|'
+    } catch {
+        return $null
+    }
+    if ($f.Count -lt 5 -or ($f[0] -ne "pull" -and $f[0] -ne "up")) { return $null }
+    return @{ Phase = $f[0]; At = $f[1]; OldApi = $f[2]; OldWeb = $f[3]; PrevTag = $f[4] }
+}
+
+function Clear-UpdateState {
+    $path = Get-UpdateStatePath
+    Remove-Item -LiteralPath $path, "$path.novo" -Force -ErrorAction SilentlyContinue
+}
+
+# Download parado no meio: a etiqueta "latest" de api e web volta para as
+# imagens que estavam em uso, para nunca subir api de uma versao e web de outra.
+function Restore-LatestTags([string]$Registry, [string]$PrevTag, [string]$OldApi, [string]$OldWeb) {
+    if ($PrevTag -ne "latest") { return }
+    $ErrorActionPreference = "Continue"
+    if ($OldApi) { & $DockerExe tag $OldApi "$Registry/ncommerce/api:latest" *> $null }
+    if ($OldWeb) { & $DockerExe tag $OldWeb "$Registry/ncommerce/web:latest" *> $null }
+}
+
+# Atualizacao que morreu sem se arrumar (janela fechada, queda de energia).
+# Quem chama tem a trava: nenhuma outra atualizacao esta rodando. Devolve o
+# que foi feito, para a tela.
+function Repair-InterruptedUpdate([string]$Registry) {
+    $st = Read-UpdateState
+    if (-not $st) {
+        Clear-UpdateState
+        return ""
+    }
+    if ($st.Phase -eq "pull") {
+        Restore-LatestTags $Registry $st.PrevTag $st.OldApi $st.OldWeb
+        Clear-UpdateState
+        return "Uma atualizacao foi interrompida durante o download. A loja continua na versao em que estava."
+    }
+    # "up": a versao nova ja estava inteira no computador. Quem chama liga a loja.
+    return "Uma atualizacao foi interrompida no meio da troca. Terminando de ligar a versao nova."
+}
