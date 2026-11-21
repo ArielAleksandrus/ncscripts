@@ -1697,6 +1697,13 @@ function Show-Success([string]$CupsPort) {
 $exitCode = 1
 try {
     $script:Lock = Enter-NcLock "Global\NCommerceInstalador"
+    # No logon a tarefa de inicio (ncommerce-update.ps1 -Recuperar) segura a
+    # trava por alguns segundos: espera um pouco antes de desistir.
+    for ($i = 0; -not $script:Lock -and $i -lt 15; $i++) {
+        if ($i -eq 0) { Write-Host "Esperando outra janela do NCommerce terminar..." }
+        Start-Sleep -Seconds 2
+        $script:Lock = Enter-NcLock "Global\NCommerceInstalador"
+    }
     if (-not $script:Lock) {
         Write-Host ""
         Write-Host "O instalador do NCommerce ja esta aberto em outra janela (ou uma atualizacao esta rodando)." -ForegroundColor Yellow

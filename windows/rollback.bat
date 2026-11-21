@@ -10,6 +10,10 @@ cd /d "%~dp0"
 "%DOCKER%" compose exec -T guard sh /ncommerce/guard.sh lista
 if errorlevel 1 (
   echo O servico guard nao esta rodando. Abra o Docker Desktop e tente de novo.
+  echo Para trocar a mao ^(suporte^):
+  echo   "%DOCKER%" image ls ^| findstr keep-
+  echo   no arquivo %~dp0.env troque a linha NCOMMERCE_TAG= por NCOMMERCE_TAG=keep-^<versao^>
+  echo   "%DOCKER%" compose up -d --no-deps api web
   goto end
 )
 if /I "%~1"=="lista" goto end
