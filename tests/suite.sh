@@ -325,7 +325,7 @@ if want interromper; then
   cp "$OUT" /tmp/out-primeira.txt
   OUT=/tmp/out2.txt run_installer
   check "a segunda sai avisando" [ "$RC" = "2" ] && grep -q "ja esta aberto em outra janela" /tmp/out2.txt
-  check "a segunda nao mexe em nada" [ "$(grep -c 'compose pull' /fake/calls.log)" = "1" ]
+  check "a segunda nao mexe em nada" [ "$(grep -c '^docker compose pull' /fake/calls.log)" = "1" ]
   wait_bg
   check "a primeira termina normal" [ "$RC" = "0" ] && out_has "INSTALACAO CONCLUIDA"
 
@@ -362,14 +362,14 @@ if want interromper; then
   t "interromper: queda de energia (kill -9) em cada ponto"
   for point in "apt-get\|dpkg --audit" "master POST /install/redeem" "docker login" "compose pull" "compose up" "mysql -uroot.*ncommerce_api_production$" "api POST"; do
     reset_all; code_file; make_backup /fake/master-backup.zip
-    knob pull_sleep 3; knob up_sleep 3; knob mysql_sleep 3
+    knob pull_sleep 3; knob up_sleep 3; knob mysql_sleep 3; knob api_post_sleep 3
     start_installer_bg
     if wait_call "$point"; then
       sleep 0.3
       signal_group KILL
       wait_bg
       pkill -f 'sleep 3600' 2>/dev/null
-      unknob pull_sleep; unknob up_sleep; unknob mysql_sleep
+      unknob pull_sleep; unknob up_sleep; unknob mysql_sleep; unknob api_post_sleep
       SHOW_OUT=0 check "[$point] morreu sem veredito" out_lacks "CONCLUIDA"
       check "[$point] trava nao fica orfa" lock_free
       run_installer
@@ -479,6 +479,7 @@ if want atualizar; then
   t "atualizar: versao nova publicada"
   installed_store
   knob published_api sha256:api2; knob published_web sha256:web2
+  knob migration_sha256_api1 20260101000000; knob migration_sha256_api2 20260101000000
   printf 'v2|sha256:api2|sha256:web2|2|good|20260101\n' >> /opt/ncommerce/control/versions.txt
   run_update
   check "sai com 0" [ "$RC" = "0" ]
@@ -583,7 +584,7 @@ if want atualizar; then
   check "o segundo sai avisando" [ "$RC" = "2" ] && grep -q "ja esta rodando em outra janela" /tmp/out2.txt
   wait_bg
   check "o primeiro termina" [ "$RC" = "0" ]
-  check "um download so" [ "$(grep -c 'compose pull' /fake/calls.log)" = "1" ]
+  check "um download so" [ "$(grep -c '^docker compose pull' /fake/calls.log)" = "1" ]
 
   t "atualizar: disco quase cheio"
   installed_store
@@ -601,7 +602,7 @@ if want atualizar; then
   check "termina" [ "$RC" = "0" ]
   check "scripts trocados" grep -q marca-nova /opt/ncommerce/rollback.sh && grep -q marca-nova /opt/ncommerce/update.sh
   check "seguiu com o update.sh novo, um log so" [ "$(ls ~/ncommerce-logs/atualizacao-*.log | wc -l)" = "1" ]
-  check "um download so das imagens" [ "$(grep -c 'compose pull' /fake/calls.log)" = "1" ]
+  check "um download so das imagens" [ "$(grep -c '^docker compose pull' /fake/calls.log)" = "1" ]
 
   t "atualizar: pacote com script danificado nao troca nenhum"
   installed_store

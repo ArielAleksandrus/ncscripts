@@ -51,9 +51,11 @@ if [ -z "${NCOMMERCE_UPDATE_LOG:-}" ]; then
   if mkdir -p "$LOG_DIR" 2>/dev/null; then
     NCOMMERCE_UPDATE_LOG="$LOG_DIR/atualizacao-$(date '+%Y%m%d-%H%M%S').log"
     export NCOMMERCE_UPDATE_LOG
-    # Ficam os 10 logs mais recentes.
+    : > "$NCOMMERCE_UPDATE_LOG" 2>/dev/null || true
+    # Ficam os 10 logs mais recentes. Sem o "|| true", a primeira atualizacao
+    # (nenhum log ainda) parava aqui em silencio por causa do pipefail.
     # shellcheck disable=SC2012
-    ls -1t "$LOG_DIR"/atualizacao-*.log 2>/dev/null | tail -n +10 | while IFS= read -r old; do rm -f -- "$old"; done
+    { ls -1t "$LOG_DIR"/atualizacao-*.log 2>/dev/null || true; } | tail -n +11 | while IFS= read -r old; do rm -f -- "$old"; done
     exec > >(trap '' INT HUP TERM; exec tee -a "$NCOMMERCE_UPDATE_LOG") 2>&1
     echo "[info] update.sh, $(date '+%Y-%m-%d %H:%M:%S %z')"
   fi
