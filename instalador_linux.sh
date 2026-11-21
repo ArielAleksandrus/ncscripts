@@ -267,7 +267,12 @@ start_sleep_inhibit() {
   INHIBIT_PID=$!
 }
 
-is_wsl() { grep -qi microsoft /proc/version 2>/dev/null; }
+# Num container (testes) rodando em cima do WSL2 o /proc/version tambem diz
+# microsoft: ali so vale o que o WSL de verdade tem.
+is_wsl() {
+  [ -n "${WSL_DISTRO_NAME:-}" ] || [ -d /run/WSL ] || [ -e /proc/sys/fs/binfmt_misc/WSLInterop ] && return 0
+  [ ! -e /.dockerenv ] && grep -qi microsoft /proc/version 2>/dev/null
+}
 
 has_desktop() {
   ! is_wsl && [ -n "${XDG_CURRENT_DESKTOP:-}${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]

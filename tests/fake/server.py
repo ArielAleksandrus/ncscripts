@@ -7,7 +7,8 @@
 
 Os arquivos de /fake/knobs mudam o comportamento (ver cada handler).
 """
-import json, os, socket, ssl, sys, threading
+import json
+import time, os, socket, ssl, sys, threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 KNOBS = "/fake/knobs"
@@ -141,6 +142,8 @@ class Api(Quiet):
     def do_POST(self):
         raw = self.body()
         log("api POST " + self.path)
+        if knob("api_post_sleep") is not None:
+            time.sleep(float(knob("api_post_sleep") or 3))
         if knob("api_post_502") is not None:
             return self.send(502, '{"error":"mestre fora"}')
         if self.configured():
