@@ -425,10 +425,10 @@ echo
 if is_step_done 5; then
   echo "PASSO 5/7 já concluído anteriormente. Pulando..."
 else
-  echo "PASSO 5/7: Ruby 3.4.13 + Rails 7 + bundle"
+  echo "PASSO 5/7: Ruby 3.4.9 + Rails 7 + bundle"
   git -C ~/.rbenv/plugins/ruby-build pull
-  rbenv install 3.4.13 --verbose || true
-  rbenv global 3.4.13
+  rbenv install 3.4.9 --verbose || true
+  rbenv global 3.4.9
   rbenv rehash
 
   echo "gem: --no-document" > ~/.gemrc
