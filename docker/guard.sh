@@ -215,6 +215,15 @@ event() {
   tail -n 20 "$C/events.txt" > "$C/events.tmp" && mv "$C/events.tmp" "$C/events.txt"
 }
 
+# O mestre atende em https://api.ncommerce.app. Um .env que ainda traz o endereco
+# antigo (a porta 3001 nao passa pelo proxy da Cloudflare) e lido como o novo.
+master_url() {
+  case "$1" in
+    https://ncommerce.app:3001|https://ncommerce.app:3001/) echo "https://api.ncommerce.app" ;;
+    *) echo "$1" ;;
+  esac
+}
+
 # kind: rollback (troca automatica), switch (pedida), crash_loop (reinicia sem voltar)
 alert() {
   printf '%s|%s|%s|%s|%s\n' "$1" "$2" "$3" "$4" "$(now)" > "$C/alert-pending"
@@ -223,7 +232,7 @@ alert() {
 
 send_alert() {
   [ -s "$C/alert-pending" ] || return 0
-  url="$(env_get NCOMMERCE_SERVER_URL /env/.env.production)"
+  url="$(master_url "$(env_get NCOMMERCE_SERVER_URL /env/.env.production)")"
   token="$(env_get NCOMMERCE_SERVER_TOKEN /env/.env.production)"
   [ -n "$url" ] && [ -n "$token" ] || return 0
   a="$(cat "$C/alert-pending")"
