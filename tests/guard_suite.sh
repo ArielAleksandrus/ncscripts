@@ -124,6 +124,19 @@ check ".env na versao guardada" grep -qx "NCOMMERCE_TAG=keep-$old" /ncommerce/.e
 check ".env mantem as outras chaves" grep -qx 'CUPS_PORT=631' /ncommerce/.env
 check "sem temporario do .env" [ ! -e /ncommerce/.env.guard.tmp ]
 
+t "guard: aviso da troca vai para api.ncommerce.app mesmo com o endereco antigo no .env da loja"
+setup; HEALTHY=0 run_guard 3
+echo sha256:api2 > /fake/state/images/reg.test_5050_ncommerce_api_latest
+echo sha256:api2 > /fake/state/containers/api
+HEALTHY=0 run_guard 3
+mkdir -p /env
+printf 'NCOMMERCE_SERVER_URL="https://ncommerce.app:3001"\nNCOMMERCE_SERVER_TOKEN=tok123\n' > /env/.env.production
+echo "3||terminal" > /ncommerce/control/request
+run_guard 3
+check "aviso no endereco novo" called "https://api.ncommerce.app/companies/rollback_alert"
+check "nada para a porta 3001" not_called "ncommerce.app:3001"
+rm -rf /env
+
 t "guard: troca pedida que falha deixa o .env como estava"
 setup; HEALTHY=0 run_guard 3
 echo sha256:api2 > /fake/state/images/reg.test_5050_ncommerce_api_latest

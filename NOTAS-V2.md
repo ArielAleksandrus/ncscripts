@@ -161,3 +161,12 @@ Windows (10 22H2 ou 11; VM serve se tiver virtualizacao aninhada)
 
 - Rodar o roteiro acima numa maquina de teste antes de publicar no master.
 - Publicar = merge no master do GitHub (decisao do Ariel).
+
+## Ajustes (branch `v2-ajustes`, 2026-11-21)
+
+- Endereco do mestre: os instaladores, o compose e o `update.sh`/`migrate-endpoints.ps1` ja usavam
+  `https://api.ncommerce.app` (o update troca a linha `NCOMMERCE_SERVER_URL` do `.env.production` do volume). A guarda
+  (`docker/guard.sh`) agora tambem le o endereco antigo `https://ncommerce.app:3001` como o novo ao mandar o alerta de
+  volta de versao, para o caso de o `.env` ainda nao ter sido trocado. A API da loja faz o mesmo sozinha
+  (`NcommerceServer.master_url`), entao a troca nao depende mais de reescrever o `.env`.
+- `advanced/setup4.sh.old` ainda cita o endereco antigo: arquivo morto, nao mexido.
