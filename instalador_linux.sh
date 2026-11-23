@@ -98,6 +98,7 @@ PLUGINS_DIR=""
 CUPS_PORT=631
 REGISTRY=""
 TAG=""
+DUMP_FILE=""
 
 # Para a instalacao com um motivo e o que fazer. Nao use dentro de $(...).
 fail() {
@@ -1432,6 +1433,7 @@ dump_database() {
   compose exec -T mysql rm -f /tmp/ncommerce-dump.sql.gz < /dev/null || true
   sudo gzip -t "$dir/$name.part" || { sudo rm -f "$dir/$name.part"; return 1; }
   sudo mv -f "$dir/$name.part" "$dir/$name"
+  DUMP_FILE="$dir/$name"
   # shellcheck disable=SC2012
   sudo sh -c "ls -1t '$dir'/$label-*.sql.gz 2>/dev/null | tail -n +4 | while IFS= read -r old; do rm -f -- \"\$old\"; done"
   echo "Copia guardada em $dir/$name."
@@ -1517,7 +1519,7 @@ restore_printers() {
 }
 
 restore_backup_into_docker() {
-  local zip="$INSTALL_DIR/ncommerce.zip" work pass marker part
+  local zip="$INSTALL_DIR/ncommerce.zip" work pass marker part saved_dump
   marker="$INSTALL_DIR/.backup-restored"
   if [ -f "$marker" ]; then
     echo "O backup ja foi restaurado numa execucao anterior."
@@ -1540,8 +1542,17 @@ restore_backup_into_docker() {
     fail "o backup (${zip}) nao tem o banco de dados (backup.sql)." "chame o suporte NCommerce."
   fi
   if [ "$STORE_ALREADY_LIVE" = "1" ]; then
-    dump_database antes-de-restaurar || fail "nao consegui guardar uma copia do banco atual antes de restaurar o backup por cima." \
-      "nada foi alterado. Confira o espaco em disco e rode de novo, ou chame o suporte NCommerce."
+    # Uma restauracao que parou no meio deixa o banco pela metade. A copia que
+    # vale e a da primeira tentativa: copiar de novo guardaria o banco pela
+    # metade e, depois de 3 tentativas, apagaria a copia boa (ficam 3).
+    saved_dump="$(state_get copia_antes_de_restaurar)"
+    if [ -n "$saved_dump" ] && sudo test -s "$saved_dump"; then
+      echo "A copia do banco de antes da restauracao ja esta guardada: $saved_dump"
+    else
+      dump_database antes-de-restaurar || fail "nao consegui guardar uma copia do banco atual antes de restaurar o backup por cima." \
+        "nada foi alterado. Confira o espaco em disco e rode de novo, ou chame o suporte NCommerce."
+      state_set copia_antes_de_restaurar "$DUMP_FILE"
+    fi
   fi
   echo "Restaurando o banco de dados da loja. Pode levar alguns minutos..."
   compose exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e "CREATE DATABASE IF NOT EXISTS ncommerce_api_production CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"' \
@@ -1583,6 +1594,7 @@ restore_backup_into_docker() {
   rm -rf "$work"
   sudo touch "$marker"
   state_set backup_restaurado "${BACKUP_ZIP:-servidor}"
+  state_unset copia_antes_de_restaurar
   echo "Backup restaurado."
 }
 

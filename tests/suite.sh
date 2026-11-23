@@ -190,6 +190,22 @@ if want instalar; then
   check "explica" out_has "nao consegui guardar uma copia do banco"
   unknob dump_fail
 
+  t "instalar: restauracao que falha e e repetida nao troca a copia de antes"
+  installed_store
+  : > /fake/state/db_import.sql
+  make_backup "/tmp/zip3.zip" BACKUP-TRES
+  knob mysql_fail 1
+  run_installer --backup "/tmp/zip3.zip"
+  first="$(grep -c '^mysqldump' /fake/calls.log)"
+  for _ in 2 3 4; do run_installer --backup "/tmp/zip3.zip"; done
+  check "falha" [ "$RC" != "0" ]
+  check "uma copia so, a da primeira tentativa" [ "$first" -ge 1 ] && [ "$(grep -c '^mysqldump' /fake/calls.log)" = "$first" ] \
+    && bash -c 'f="$(sed -n "s/^copia_antes_de_restaurar=//p" ~/.ncommerce-docker/instalacao.estado)"; [ -s "$f" ]'
+  check "avisa que a copia ja esta guardada" out_has "copia do banco de antes da restauracao ja esta guardada"
+  rm -f /fake/knobs/mysql_fail
+  run_installer --backup "/tmp/zip3.zip"
+  check "depois restaura" [ "$RC" = "0" ] && grep -q 'BACKUP-TRES' /fake/state/db_import.sql
+
   t "instalar: codigo recusado, depois digitado"
   reset_all; code_file BADCODE1
   STDIN_TEXT=$'abc\ngood-code\n' run_installer
