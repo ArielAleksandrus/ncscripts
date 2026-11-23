@@ -43,6 +43,19 @@ exit /b 1
 :ready
 cd /d "%DIR%"
 if not exist "%DIR%\control" mkdir "%DIR%\control"
+rem R18: troca de tipo pela metade (o TrocarTipoWindows.bat deixa control\pausa enquanto
+rem roda). Subir a loja inteira agora a ligaria sobre um banco incompleto: so o banco
+rem (mysql e redis) sobe, para a troca poder continuar, e a janela diz o que fazer.
+if exist "%DIR%\control\pausa" (
+  echo.
+  echo ATENCAO: ha uma troca do tipo da loja em andamento ^(ou interrompida^).
+  echo A loja NAO foi ligada: so o banco de dados, para a troca poder continuar.
+  echo Rode de novo o TrocarTipoWindows.bat para terminar a troca, ou chame o suporte.
+  echo.
+  "%DOCKER%" compose up -d mysql redis
+  pause
+  exit /b 0
+)
 if /I "%~1"=="pull" goto pull
 rem Atualizacao que parou no meio (janela fechada, queda de energia): o
 rem ncommerce-update.ps1 desfaz o download pela metade antes de ligar, para a
