@@ -520,6 +520,41 @@ if want atualizar; then
   check "etiqueta latest volta para a versao em uso" [ "$(api_latest)" = "sha256:api1" ]
   check "veredito" out_has "A ATUALIZACAO NAO FOI FEITA. A LOJA CONTINUA NA VERSAO EM QUE ESTAVA"
 
+  # R20 (respostas da revisao geral)
+  t "atualizar: sem o container da api e com o banco parado, copia o banco antes"
+  installed_store
+  rm -f /fake/state/containers/api /fake/state/containers/api.status
+  echo exited > /fake/state/containers/mysql.status
+  : > /fake/calls.log
+  knob published_api sha256:api2; knob migration_sha256_api2 20260101000000
+  run_update
+  check "sai com 0" [ "$RC" = "0" ]
+  check "ligou so o banco para a copia" called "compose up -d mysql"
+  check "copia guardada" bash -c 'ls /opt/ncommerce/backups/antes-de-atualizar-*.sql.gz >/dev/null 2>&1'
+  check "copia antes da troca" bash -c '[ "$(grep -n mysqldump /fake/calls.log | head -1 | cut -d: -f1)" -lt "$(grep -n "compose up -d$" /fake/calls.log | head -1 | cut -d: -f1)" ]'
+
+  t "atualizar: a primeira copia de uma serie de tentativas fica"
+  installed_store
+  sudo mkdir -p /opt/ncommerce/backups
+  for d in 20260101-000001 20260101-000002 20260101-000003 20260101-000004; do
+    echo velho | gzip > "/tmp/c.gz"; sudo cp /tmp/c.gz "/opt/ncommerce/backups/antes-de-atualizar-$d.sql.gz"
+    sudo touch -d "2026-01-01 00:00:${d: -2}" "/opt/ncommerce/backups/antes-de-atualizar-$d.sql.gz"
+  done
+  echo "antes-de-atualizar-20260101-000001.sql.gz" | sudo tee /opt/ncommerce/backups/.serie > /dev/null
+  knob published_api sha256:api3; knob migration_sha256_api1 20260101000000; knob migration_sha256_api3 20260202000000
+  knob up_fail 9
+  run_update
+  check "a atualizacao falhou" [ "$RC" != "0" ]
+  check "a primeira da serie continua" [ -f /opt/ncommerce/backups/antes-de-atualizar-20260101-000001.sql.gz ]
+  check "e as 3 mais novas" [ "$(ls /opt/ncommerce/backups/antes-de-atualizar-*.sql.gz | wc -l)" = "4" ]
+  check "a mais velha depois da primeira saiu" [ ! -f /opt/ncommerce/backups/antes-de-atualizar-20260101-000002.sql.gz ]
+  check "a serie continua marcada" grep -q 20260101-000001 /opt/ncommerce/backups/.serie
+  unknob up_fail
+  knob published_api sha256:api4; knob migration_sha256_api4 20260303000000
+  printf 'v4|sha256:api4|sha256:web1|4|good|20260101\n' >> /opt/ncommerce/control/versions.txt
+  run_update
+  check "deu certo: a serie termina" [ "$RC" = "0" ] && [ ! -e /opt/ncommerce/backups/.serie ]
+
   t "atualizar: internet cai no meio do download (api baixou, web nao)"
   installed_store
   knob published_api sha256:api2; knob published_web sha256:web2; knob pull_partial 9

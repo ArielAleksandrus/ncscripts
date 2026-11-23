@@ -10,10 +10,11 @@ BeforeAll {
     $env:NCOMMERCE_DOCKER_EXE = Join-Path $Repo "tests/fake/bin/docker"
     $env:NCOMMERCE_UPDATE_WAIT_S = "20"
     $env:NCOMMERCE_RETRY_WAIT_S = "0"
-    # So o mysqldump de mentira entra no PATH (o docker de mentira roda o exec aqui).
+    # So o mysqldump e o mysqladmin de mentira entram no PATH (o docker de mentira roda o exec aqui).
     $script:Bin = "/tmp/fakebin"
     New-Item -ItemType Directory -Force -Path $Bin | Out-Null
     & ln -sf (Join-Path $Repo "tests/fake/bin/mysqldump") (Join-Path $Bin "mysqldump")
+    & ln -sf (Join-Path $Repo "tests/windows/fake/mysqladmin") (Join-Path $Bin "mysqladmin")
     $env:PATH = "${Bin}:$env:PATH"
 
     function Set-Knob([string]$Name, [string]$Value = "1") { [IO.File]::WriteAllText("/fake/knobs/$Name", "$Value`n") }
@@ -120,6 +121,40 @@ Describe "atualizar" {
         @(Get-ChildItem "$Loja/backups" -Filter "antes-de-atualizar-*.sql.gz").Count | Should -Be 1
         $calls = Get-Calls
         $calls.IndexOf("mysqldump") | Should -BeLessThan $calls.IndexOf("compose up")
+    }
+
+    # R20 (respostas da revisao geral)
+    It "sem o container da api e com o banco parado, liga o banco e copia antes" {
+        Reset-Store
+        Remove-Item "/fake/state/containers/api", "/fake/state/containers/api.status" -Force -ErrorAction SilentlyContinue
+        [IO.File]::WriteAllText("/fake/state/containers/mysql.status", "exited`n")
+        Set-Knob "published_api" "sha256:api2"
+        Invoke-StoreUpdate
+        $Rc | Should -Be 0
+        $calls = Get-Calls
+        $calls | Should -Match "compose up -d mysql"
+        @(Get-ChildItem "$Loja/backups" -Filter "antes-de-atualizar-*.sql.gz").Count | Should -Be 1
+        $calls.IndexOf("mysqldump") | Should -BeLessThan $calls.LastIndexOf("compose up -d")
+    }
+
+    It "guarda sempre a primeira copia de uma serie de tentativas, e a serie termina quando da certo" {
+        Reset-Store
+        New-Item -ItemType Directory -Force -Path "$Loja/backups" | Out-Null
+        $i = 0
+        foreach ($d in @("20260101-000001", "20260101-000002", "20260101-000003", "20260101-000004")) {
+            $i++
+            $f = "$Loja/backups/antes-de-atualizar-$d.sql.gz"
+            & sh -c "echo velho | gzip > '$f'"
+            (Get-Item $f).LastWriteTime = (Get-Date "2026-01-01").AddMinutes($i)
+        }
+        [IO.File]::WriteAllText("$Loja/backups/.serie-antes-de-atualizar", "antes-de-atualizar-20260101-000001.sql.gz`n")
+        Set-Knob "published_api" "sha256:api3"; Set-Knob "migration_sha256_api3" "20260202000000"
+        Invoke-StoreUpdate
+        $Rc | Should -Be 0
+        Test-Path "$Loja/backups/antes-de-atualizar-20260101-000001.sql.gz" | Should -BeTrue
+        Test-Path "$Loja/backups/antes-de-atualizar-20260101-000002.sql.gz" | Should -BeFalse
+        @(Get-ChildItem "$Loja/backups" -Filter "antes-de-atualizar-*.sql.gz").Count | Should -Be 4
+        Test-Path "$Loja/backups/.serie-antes-de-atualizar" | Should -BeFalse
     }
 
     It "sem copia do banco nao atualiza e a etiqueta latest volta" {

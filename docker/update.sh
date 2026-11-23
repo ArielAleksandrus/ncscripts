@@ -294,12 +294,35 @@ last_migration() {
 }
 
 # Copia do banco antes de uma versao que muda as tabelas. Fica em backups/
-# (so root le), as 3 mais recentes.
+# (so root le): as 3 mais recentes e, sempre, a primeira de uma serie de
+# tentativas (R20): se a atualizacao falha e e tentada de novo varias vezes, a
+# copia de antes da primeira tentativa (a do banco que funcionava) nao some.
+# A serie fica em backups/.serie e termina quando uma atualizacao da certo.
+SERIES_FILE="$INSTALL_DIR/backups/.serie"
+
+# O banco liga sozinho para a copia (R20): sem o container da api, ou com a loja
+# parada, a copia era pulada.
+ensure_mysql_running() {
+  local i running
+  # sem pipe direto no grep -q: com pipefail, o grep que sai cedo faria o ps "falhar"
+  running="$(compose ps --services --status running 2>/dev/null < /dev/null || true)"
+  printf '%s\n' "$running" | grep -qx mysql && return 0
+  echo "O banco de dados estava desligado: ligando so ele para a copia..."
+  compose up -d mysql < /dev/null || return 1
+  for ((i = 0; i < 30; i++)); do
+    # shellcheck disable=SC2016
+    compose exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e "SELECT 1" >/dev/null 2>&1' < /dev/null && return 0
+    sleep 2
+  done
+  return 1
+}
+
 dump_database() {
-  local dir="$INSTALL_DIR/backups" name
+  local dir="$INSTALL_DIR/backups" name first
   name="antes-de-atualizar-$(date '+%Y%m%d-%H%M%S').sql.gz"
   sudo mkdir -p "$dir"
   sudo chmod 700 "$dir"
+  ensure_mysql_running || return 1
   # Sem pipe: o codigo de saida do mysqldump e a ultima linha ("Dump completed") valem.
   # shellcheck disable=SC2016
   if ! compose exec -T mysql sh -c 'rm -f /tmp/ncommerce-dump.sql /tmp/ncommerce-dump.sql.gz
@@ -314,8 +337,13 @@ dump_database() {
   compose exec -T mysql rm -f /tmp/ncommerce-dump.sql.gz < /dev/null || true
   sudo gzip -t "$dir/$name.part" || { sudo rm -f "$dir/$name.part"; return 1; }
   sudo mv -f "$dir/$name.part" "$dir/$name"
+  first="$(sudo cat "$SERIES_FILE" 2>/dev/null || true)"
+  if [ -z "$first" ] || ! sudo test -f "$dir/$first"; then
+    first="$name"
+    echo "$first" | sudo tee "$SERIES_FILE" > /dev/null
+  fi
   # shellcheck disable=SC2012
-  sudo sh -c "ls -1t '$dir'/antes-de-atualizar-*.sql.gz 2>/dev/null | tail -n +4 | while IFS= read -r old; do rm -f -- \"\$old\"; done"
+  sudo sh -c "ls -1t '$dir'/antes-de-atualizar-*.sql.gz 2>/dev/null | grep -vxF '$dir/$first' | tail -n +4 | while IFS= read -r old; do rm -f -- \"\$old\"; done"
   echo "Copia do banco guardada em $dir/$name."
 }
 
@@ -346,8 +374,11 @@ if [ "$pulled" -ne 1 ]; then
 fi
 
 NEW_API="$(image_id "$REG/ncommerce/api:latest")"
-if [ -n "$NEW_API" ] && [ -n "$OLD_API" ] && [ "$NEW_API" != "$OLD_API" ] && [ "${NCOMMERCE_SKIP_DB_BACKUP:-}" != "1" ]; then
-  old_mig="$(last_migration "$OLD_API")"
+# Sem o container da api (apagado, ou nunca ligou) nao da para saber a versao do
+# banco: copia sempre (R20).
+if [ -n "$NEW_API" ] && [ "$NEW_API" != "$OLD_API" ] && [ "${NCOMMERCE_SKIP_DB_BACKUP:-}" != "1" ]; then
+  old_mig=""
+  [ -z "$OLD_API" ] || old_mig="$(last_migration "$OLD_API")"
   new_mig="$(last_migration "$NEW_API")"
   if [ -z "$old_mig" ] || [ "$old_mig" != "$new_mig" ]; then
     echo "A versao nova muda o banco de dados. Guardando uma copia antes..."
@@ -425,6 +456,8 @@ status=0
 wait_verdict || status=$?
 compose ps || true
 FINISHED=1
+# A atualizacao deu certo (ou esta em teste): a proxima serie de copias comeca do zero.
+[ "$status" = 1 ] || sudo rm -f "$SERIES_FILE" 2>/dev/null || true
 case "$status" in
   0)
     verdict "ATUALIZACAO CONCLUIDA. ${VERDICT_NAME:+VERSAO $VERDICT_NAME }FUNCIONANDO." "Pode fechar esta janela."

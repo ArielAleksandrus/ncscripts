@@ -337,7 +337,7 @@ function Test-Store {
         7 { Confirm-PendingNotes; return }
         3 {
             Say ""
-            Say "Feche os caixas e as comandas acima e abra de novo."
+            Say "Feche os caixas, as comandas e os pedidos online acima e abra de novo."
             Say "Nada foi mudado."
             Stop-Changer 3 "recusado"
         }
@@ -411,6 +411,7 @@ function Save-Backup {
     } catch {
         Fail "nao consegui criar a pasta $partial ($($_.Exception.Message))."
     }
+    Protect-NcBackupDir $partial | Out-Null
     if (-not (Wait-MysqlReady)) { Fail "o banco de dados nao respondeu para a copia." }
     Say "  - banco de dados (pode levar alguns minutos)"
     $r = Invoke-MysqlSh $DumpSh

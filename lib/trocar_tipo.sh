@@ -230,7 +230,7 @@ tt_conferir_loja() {
     3)
       NC_VERDICT="ok"
       echo
-      echo "Feche os caixas e as comandas acima e rode de novo."
+      echo "Feche os caixas, as comandas e os pedidos online acima e rode de novo."
       echo "Nada foi mudado."
       tt_ligar_se_parada
       tt_encerrar_estado_sem_reset

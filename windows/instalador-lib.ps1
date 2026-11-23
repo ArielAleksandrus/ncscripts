@@ -273,6 +273,30 @@ function Invoke-Native {
     return [int]$code
 }
 
+# R19: a pasta da copia de seguranca (banco e token da loja) fora da instalacao
+# (C:\NCommerce-backup-*) herdava as permissoes de C:\, que todo usuario do PC le.
+# Fica so para Administradores (S-1-5-32-544) e SYSTEM (S-1-5-18), sem heranca.
+# Pelos SIDs: o nome do grupo muda com o idioma do Windows. Num pen drive FAT/exFAT
+# nao ha permissoes: so avisa. NCOMMERCE_ICACLS_EXE troca o programa (testes).
+# Fim de uma serie de copias (a atualizacao deu certo): a proxima comeca do zero.
+function Clear-NcDumpSeries([string]$Label) {
+    Remove-Item -LiteralPath (Join-Path (Join-Path $InstallDir "backups") ".serie-$Label") -Force -ErrorAction SilentlyContinue
+}
+
+function Protect-NcBackupDir([string]$Path) {
+    $exe = $env:NCOMMERCE_ICACLS_EXE
+    if (-not $exe) {
+        if ((Test-Path variable:IsWindows) -and -not $IsWindows) { return $true }
+        $exe = "icacls.exe"
+    }
+    $code = Invoke-Native $exe @($Path, "/inheritance:r", "/grant:r", "*S-1-5-32-544:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F") -Quiet
+    if ($code -ne 0) {
+        Warn "nao consegui restringir a pasta $Path aos administradores (pen drive sem permissoes?). Guarde a copia em lugar seguro."
+        return $false
+    }
+    return $true
+}
+
 # Tenta ate $Times vezes, esperando $WaitSeconds * tentativa entre elas.
 # O bloco devolve $true quando deu certo.
 function Invoke-Retry([int]$Times, [int]$WaitSeconds, [scriptblock]$Action) {
@@ -613,7 +637,17 @@ function Save-DatabaseDump([string]$Label) {
         return $false
     }
     [System.IO.File]::Move($part, (Join-Path $dir $name))
-    Get-ChildItem -LiteralPath $dir -Filter "$Label-*.sql.gz" | Sort-Object LastWriteTime -Descending |
+    # R20: as 3 mais novas e, sempre, a primeira de uma serie de tentativas (a do
+    # banco de antes da primeira tentativa). A serie termina com Clear-NcDumpSeries.
+    $series = Join-Path $dir ".serie-$Label"
+    $first = ""
+    if (Test-Path -LiteralPath $series) { $first = "$(Get-Content -Raw -LiteralPath $series)".Trim() }
+    if (-not $first -or -not (Test-Path -LiteralPath (Join-Path $dir $first))) {
+        $first = $name
+        Write-FileAtomic $series "$first`n"
+    }
+    Get-ChildItem -LiteralPath $dir -Filter "$Label-*.sql.gz" | Where-Object { $_.Name -ne $first } |
+        Sort-Object LastWriteTime -Descending |
         Select-Object -Skip 3 | Remove-Item -Force -ErrorAction SilentlyContinue
     Say "Copia guardada em $(Join-Path $dir $name)."
     return $true

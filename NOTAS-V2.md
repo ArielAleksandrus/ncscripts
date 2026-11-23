@@ -255,3 +255,12 @@ registra o evento em `POST /companies/commerce_type_change` (NOTAS-V2 do ncommer
 - Testes: `tests/run.sh trocar_tipo` (Docker + nativo; fakes novos: `tests/fake/troca_rake.sh`, `bundle`, `compose
   run`, banco temporario e contagens no `mysql`) e `tests/windows/trocar_tipo.Tests.ps1`. Nada rodou num Linux ou
   Windows de verdade, nem contra uma API real (o rake e de mentira nos testes; as tarefas tem specs proprias na API).
+
+## Respostas da revisão geral (branch `v2-respostas-revisao`, 23/11)
+- R17: mensagem de bloqueio da troca de tipo cita os pedidos online.
+- R18: `ncommerce-docker-startup.bat` com `control\pausa` sobe só mysql e redis e avisa da troca em andamento.
+- R19: `Protect-NcBackupDir` (icacls por SID: Administradores e SYSTEM, sem herança) na pasta da cópia da troca de tipo
+  e do desinstalador; pen drive sem permissões só avisa.
+- R20: atualizador (Linux e Windows) copia o banco também sem o container da api (liga só o mysql se estiver parado) e
+  guarda sempre a primeira cópia da série de tentativas (`backups/.serie`, Windows `.serie-<rótulo>`) além das 3 mais
+  novas; a série termina quando a atualização dá certo (ou fica em teste).
