@@ -37,11 +37,29 @@ if ($ips) {
 $utf8 = New-Object System.Text.UTF8Encoding $false
 [System.IO.File]::WriteAllText($ipCmd, (($lines -join "`n") + "`n"), $utf8)
 
+# O .env e UTF-8 sem BOM (e assim que o docker compose le). O Get-Content do
+# PowerShell 5.1 leria na pagina de codigo do Windows e, gravado de volta em
+# UTF-8, um caminho com acento (C:\Users\Joao com til) ficaria mais estragado a
+# cada logon. Um .env antigo que nao e UTF-8 valido e lido na pagina do Windows.
+# Gravado ao lado e trocado de uma vez: queda de energia nao deixa .env vazio.
 $envFile = Join-Path $Dir ".env"
 if (Test-Path $envFile) {
-    $kept = @(Get-Content -Path $envFile | Where-Object { $_ -notlike 'NCOMMERCE_HOST_IPS=*' })
+    $bytes = [System.IO.File]::ReadAllBytes($envFile)
+    try {
+        $text = (New-Object System.Text.UTF8Encoding $false, $true).GetString($bytes)
+    } catch {
+        $text = [System.Text.Encoding]::Default.GetString($bytes)
+    }
+    $text = $text.TrimStart([char]0xFEFF)
+    $kept = @($text -split "\r?\n" | Where-Object { $_ -and $_ -notlike 'NCOMMERCE_HOST_IPS=*' })
     $kept += "NCOMMERCE_HOST_IPS=$ips"
-    [System.IO.File]::WriteAllText($envFile, (($kept -join "`n") + "`n"), $utf8)
+    $tmp = "$envFile.novo"
+    [System.IO.File]::WriteAllText($tmp, (($kept -join "`n") + "`n"), $utf8)
+    if ([System.IO.File]::Exists($envFile)) {
+        [System.IO.File]::Replace($tmp, $envFile, [NullString]::Value)
+    } else {
+        [System.IO.File]::Move($tmp, $envFile)
+    }
 }
 
 if ($ips) {

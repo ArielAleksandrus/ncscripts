@@ -285,3 +285,21 @@ Describe "programas e tentativas" {
         @(Get-ChildItem $d -Filter "teste-*.log").Count | Should -Be 10
     }
 }
+
+Describe "refresh-host-ips.ps1" {
+    It "mantem o .env em UTF-8: caminho com acento nao estraga a cada logon" {
+        $d = New-TestDir
+        $u8 = New-Object System.Text.UTF8Encoding $false
+        $plug = "C:/Users/Jo" + [char]0x00E3 + "o/Documents/ncommerce/plugins"
+        [IO.File]::WriteAllText((Join-Path $d ".env"), "NCOMMERCE_PLUGINS_DIR=$plug`nNCOMMERCE_HOST_IPS=1.2.3.4`n", $u8)
+        $script = Join-Path $PSScriptRoot "../../windows/refresh-host-ips.ps1"
+        for ($i = 0; $i -lt 2; $i++) {
+            & pwsh -NoProfile -Command "function Get-NetIPAddress { }; & '$script' '$d'" | Out-Null
+            $LASTEXITCODE | Should -Be 0
+        }
+        $text = [IO.File]::ReadAllText((Join-Path $d ".env"), $u8)
+        $text | Should -Match ([regex]::Escape("NCOMMERCE_PLUGINS_DIR=$plug"))
+        @($text -split "`n" | Where-Object { $_ -like "NCOMMERCE_HOST_IPS=*" }).Count | Should -Be 1
+        Test-Path (Join-Path $d ".env.novo") | Should -BeFalse
+    }
+}
