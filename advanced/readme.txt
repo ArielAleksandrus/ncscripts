@@ -13,6 +13,12 @@ ESTA PASTA (advanced/)
     Usa o mesmo codigo de instalacao do ncommerce_manager. A chave do tunel Nlabs e o
     ID do AnyDesk vao sozinhos para o manager, nada para colar no servidor.
   - windows-wsl/: instalacao nativa dentro do WSL de um PC Windows (ver README.txt la).
+  - desinstalador_nativo.sh: desinstala a instalacao nativa (Ubuntu ou dentro do WSL).
+    Rode da raiz: ./advanced/desinstalador_nativo.sh  (--simular mostra o que faria;
+    --sem-backup nao guarda a copia). Guarda antes o banco, o .env.production, o
+    /etc/environment, os sites do nginx, o cron e ~/NCommerce numa pasta fora da instalacao.
+    No WSL, o que ficou no Windows (tarefa "NCommerce WSL Startup", C:\NCommerce\wsl,
+    firewall e portproxy) aparece na lista do fim, para remover a mao.
   - setup1.sh.old ... setup5.sh.old e mysql-setup.sql.old: o passo a passo antigo, abaixo.
     Nao devem ser mais usados. Para rodar um, tire o .old.
 

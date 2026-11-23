@@ -1,0 +1,3 @@
+#!/bin/sh
+echo "mysqladmin $*" >> /fake/calls.log
+[ ! -e /fake/knobs/mysql_down ]

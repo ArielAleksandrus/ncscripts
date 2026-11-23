@@ -170,3 +170,43 @@ Windows (10 22H2 ou 11; VM serve se tiver virtualizacao aninhada)
   volta de versao, para o caso de o `.env` ainda nao ter sido trocado. A API da loja faz o mesmo sozinha
   (`NcommerceServer.master_url`), entao a troca nao depende mais de reescrever o `.env`.
 - `advanced/setup4.sh.old` ainda cita o endereco antigo: arquivo morto, nao mexido.
+
+## Desinstaladores (branch `v2-tipo-fixo`, 23/11)
+
+Um por sistema que os instaladores suportam. Todos: mostram o que vao fazer, pedem para digitar DESINSTALAR, fazem
+por padrao uma COPIA fora da instalacao antes de remover (se a copia falhar, nada e removido), removem so o que o
+instalador cria e listam o resto no fim ("remova a mao se quiser"), aguentam interrupcao (estado de etapas, a copia
+nao e refeita) e tem modo simular. Nada foi rodado de verdade: so nos containers de teste com os fakes.
+
+- Linux Docker: `desinstalador_linux.sh` [--simular] [--sem-backup] [--backup-em PASTA]. Funcoes comuns em
+  `lib/desinstalador.sh`. Copia em `~/ncommerce-backup-desinstalacao-<data>` (700): dump do `ncommerce_api_production`
+  (conferido: gzip inteiro + "Dump completed"), `/opt/ncommerce` inteiro, plugins e os volumes (menos mysql_data,
+  api_log, api_print) em .tar.gz via `docker run` com uma imagem ja presente. Remove: unidades `ncommerce-*`
+  (anydesk-id, net-check, tunnel-route), retomada do instalador, `compose down --volumes` (+ sobras por rotulo do
+  projeto), imagens `*/ncommerce/api|web` de qualquer etiqueta, `docker logout` dos registries com login do root,
+  rota /32 do tunel (ip route e NetworkManager), regra udev 70-printers -> /dev/null, keepalive do SSH, ufw 3000/4200,
+  `/opt/ncommerce`, atalho Atualizar NCommerce, `~/.ncommerce-docker`. Fica (lista): Docker, grupo docker, imagens
+  genericas mysql/redis/docker-cli, AnyDesk, openssh-server, ufw 22, arp-scan, `Documentos/ncommerce` (plugins, ja na
+  copia), `~/ncommerce-logs`. Estado em `~/.ncommerce-desinstalacao` (apagado no fim). Recusa rodar com o instalador ou
+  o update.sh abertos (trava `~/.ncommerce-docker/instalador.lock`).
+- Nativo (Ubuntu e WSL): `advanced/desinstalador_nativo.sh`, mesmas opcoes. Copia: dump, `~/NCommerce` sem
+  node_modules/.git/log/tmp/dist/vendor/bundle, `.env.production`, `/etc/environment`, sites do nginx, linhas do cron.
+  Remove: sites ncommerce/ncommerce-api do nginx, linhas do NCommerce no cron (usuario e root), Sidekiq e tunel nativos,
+  sidekiq.service antigo, banco `ncommerce_api_production` e usuario `'ncommerce'@'localhost'`, as linhas do .env que o
+  instalador pos no `/etc/environment` (guardadas antes em `~/.ncommerce-desinstalacao-nativo`, 600), `~/NCommerce`,
+  atalho Restauracao, `~/.ncommerce-progress`, `/var/lib/ncommerce-nativo`, keepalive do SSH. Fica (lista): rbenv/Ruby,
+  nginx/Passenger, MySQL, Redis compilado, Chrome, Java, Prince, phantomjs, drivers, AnyDesk/TeamViewer, Dropbox,
+  bloco nlabs do ~/.ssh/config; no WSL, o lado Windows (tarefa "NCommerce WSL Startup", C:\NCommerce\wsl, firewall,
+  portproxy, distro).
+- Windows Docker: `DesinstaladorWindows.bat` -> `windows/desinstalador_windows.ps1` [-Simular] [-SemBackup]
+  [-PastaBackup X] [-Confirmacao DESINSTALAR]. Copia em `C:\NCommerce-backup-desinstalacao-<data>` (nao em Documentos:
+  costuma ir para o OneDrive e a copia tem token e senhas), montada em `.parcial` e renomeada quando completa; para
+  guard/api/web antes do dump. Remove: projeto `ncommerce` (containers, rede, 10 volumes), imagens api/web, login do
+  registry, tarefas "NCommerce Docker Startup/Instalador Retomar/Aviso Reinicio/Impressoras USB", regras de firewall
+  "NCommerce TCP 3000/4200, LPD 515", atalhos, `C:\NCommerce` (menos `wsl`), `C:\ProgramData\NCommerce`, plugins.
+  Fica (lista): Docker Desktop, WSL, imagens genericas, AnyDesk (trocar a senha do acesso nao supervisionado), OpenSSH,
+  LPD, driver Bematech, rede Privada, grupo docker-users. Log e estado em `C:\ProgramData\NCommerce-desinstalacao`.
+- Testes: `tests/run.sh desinstalar` (Linux Docker + nativo, fakes novos: crontab, volumes/down/image ls/logout/rm no
+  docker, banco nativo no mysql) e `tests/windows/uninstaller.Tests.ps1` (fakes em `tests/windows/fake/`).
+- Nao verificado: nada rodou num Windows nem num Linux de verdade (tarefas agendadas, firewall, docker cp do Docker
+  Desktop, .bat/UAC; no Linux: systemd, nmcli, ufw, sshd reais).

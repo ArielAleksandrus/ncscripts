@@ -1,6 +1,11 @@
 #!/bin/sh
 echo "mysql $*" >> /fake/calls.log
 case "$*" in
+  # Instalacao nativa de mentira (desinstalador_nativo.sh).
+  *"SHOW DATABASES"*) [ -e /fake/state/native_db ] && echo ncommerce_api_production; exit 0 ;;
+  *"FROM mysql.user"*) [ -e /fake/state/native_db_user ] && echo 1; exit 0 ;;
+  *"DROP DATABASE"*) rm -f /fake/state/native_db; exit 0 ;;
+  *"DROP USER"*) rm -f /fake/state/native_db_user; exit 0 ;;
   *" -e "*) exit 0 ;;
 esac
 s="$(cat /fake/knobs/mysql_sleep 2>/dev/null)"; [ -z "$s" ] || sleep "$s"

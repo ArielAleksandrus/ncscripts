@@ -1,0 +1,10 @@
+#!/bin/sh
+# crontab de mentira: um arquivo por usuario (o sudo de mentira marca FAKE_ROOT).
+f=/fake/state/crontab-user
+[ -z "${FAKE_ROOT:-}" ] || f=/fake/state/crontab-root
+echo "crontab $*" >> /fake/calls.log
+case "$1" in
+  -l) [ -f "$f" ] || { echo "no crontab for user" >&2; exit 1; }; cat "$f" ;;
+  -) cat > "$f" ;;
+  *) echo "fake crontab: $* nao implementado" >&2; exit 64 ;;
+esac

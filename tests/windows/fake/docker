@@ -1,0 +1,111 @@
+#!/bin/sh
+# Docker de mentira do desinstalador: o que o tests/fake/bin/docker nao tem
+# (containers de outros projetos, volumes, redes, lista de imagens, docker cp,
+# compose down/stop) e o resto vai para ele. Estado em /fake/state:
+#   containers/<nome>[.project]  volumes/<nome> e networks/<nome> (conteudo = projeto)
+#   imagelist                    linhas repositorio|tag|id
+# Containers sem .project sao os da loja (os do docker de mentira comum).
+S=/fake/state
+K=/fake/knobs
+REAL="$(dirname "$0")/../../fake/bin/docker"
+mkdir -p "$S/containers" "$S/volumes" "$S/networks" "$K"
+touch "$S/imagelist"
+log() { echo "docker $*" >> /fake/calls.log; }
+project_of() { cat "$S/containers/$1.project" 2>/dev/null; }
+label_project() { echo "$*" | sed -n 's/.*compose\.project=\([A-Za-z0-9_-]*\).*/\1/p'; }
+by_project() {  # dir project -> nomes cujo conteudo e o projeto
+  for f in "$S/$1"/*; do [ -f "$f" ] && [ "$(cat "$f")" = "$2" ] && basename "$f"; done
+}
+# compose [-f x|-p x|--project-directory x] <sub> <resto>
+compose_sub() { shift; while :; do case "$1" in -f|-p|--project-directory) shift 2 ;; *) break ;; esac; done; echo "$1"; }
+compose_rest() {
+  shift; while :; do case "$1" in -f|-p|--project-directory) shift 2 ;; *) break ;; esac; done; shift
+  echo "${*:-mysql redis api web guard}"
+}
+[ ! -e "$K/daemon_down" ] || exec "$REAL" "$@"
+
+case "$1" in
+  ps)
+    case "$*" in *compose.service=*) exec "$REAL" "$@" ;; esac
+    log "$@"; p="$(label_project "$*")"
+    for f in "$S"/containers/*; do
+      n="$(basename "$f")"
+      case "$n" in *.status|*.project|\*) continue ;; esac
+      own="$(project_of "$n")"
+      [ -z "$own" ] || [ "$own" = "$p" ] || continue
+      echo "$n"
+    done
+    exit 0 ;;
+  rm)
+    log "$@"; shift; [ "$1" = "-f" ] && shift
+    for c in "$@"; do rm -f "$S/containers/$c" "$S/containers/$c.status" "$S/containers/$c.project"; done
+    exit 0 ;;
+  volume|network)
+    kind="$1"; dir="${1}s"; log "$@"; sub="$2"; shift 2
+    case "$sub" in
+      ls) by_project "$dir" "$(label_project "$*")"; exit 0 ;;
+      inspect) [ -f "$S/$dir/$1" ] ;;
+      rm)
+        if [ "$kind" = volume ] && [ -e "$K/volume_rm_hang" ]; then sleep 60; fi
+        rc=0
+        for v in "$@"; do
+          if [ "$kind" = volume ] && [ -e "$K/volume_in_use_$v" ]; then echo "volume is in use" >&2; rc=1; continue; fi
+          [ -f "$S/$dir/$v" ] && rm -f "$S/$dir/$v" || rc=1
+        done
+        exit $rc ;;
+      *) exit 64 ;;
+    esac
+    exit $? ;;
+  image)
+    case "$2" in
+      ls) log "$@"; cat "$S/imagelist"; exit 0 ;;
+      rm)
+        log "$@"; ref="$3"
+        line="$(awk -F'|' -v r="$ref" '($1":"$2)==r || $3==r' "$S/imagelist" | head -n 1)"
+        [ -n "$line" ] || { echo "No such image: $ref" >&2; exit 1; }
+        [ ! -e "$K/image_rm_fail" ] || { echo "image is being used" >&2; exit 1; }
+        awk -F'|' -v r="$ref" '!(($1":"$2)==r || $3==r)' "$S/imagelist" > "$S/imagelist.new"
+        mv "$S/imagelist.new" "$S/imagelist"
+        rm -f "$S/images/$(echo "$ref" | tr '/:' '__')"
+        exit 0 ;;
+    esac
+    exec "$REAL" "$@" ;;
+  cp)
+    # docker cp <container>:<caminho> <destino>; o caminho do container fica em /fake/ctr.
+    log "$@"
+    [ ! -e "$K/cp_vol_fail" ] || { echo "cp failed" >&2; exit 1; }
+    src="/fake/ctr$(echo "$2" | sed 's/^[^:]*://')"
+    [ -e "$src" ] || { echo "no such path" >&2; exit 1; }
+    cp -a "$src" "$3"; exit $? ;;
+  logout) log "$@"; echo "Removing login credentials for $2"; exit 0 ;;
+  compose)
+    args="$*"
+    case "$(compose_sub "$@")" in
+      down)
+        log "$args"
+        [ ! -e "$K/down_fail" ] || { echo "down failed" >&2; exit 1; }
+        for s in mysql redis api web guard; do
+          [ -z "$(project_of "$s")" ] && rm -f "$S/containers/$s" "$S/containers/$s.status"
+        done
+        p="$(basename "$PWD" | tr 'A-Z' 'a-z')"
+        for n in $(by_project networks "$p"); do rm -f "$S/networks/$n"; done
+        exit 0 ;;
+      stop)
+        log "$args"
+        for s in $(compose_rest "$@"); do
+          [ -f "$S/containers/$s" ] && echo exited > "$S/containers/$s.status"
+        done
+        exit 0 ;;
+      up)
+        case "$args" in
+          *--no-start*)
+            log "$args"
+            for s in mysql redis api web guard; do
+              [ -f "$S/containers/$s" ] || { echo "sha256:$s" > "$S/containers/$s"; echo created > "$S/containers/$s.status"; }
+            done
+            exit 0 ;;
+        esac ;;
+    esac
+    exec "$REAL" "$@" ;;
+esac
+exec "$REAL" "$@"

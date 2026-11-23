@@ -46,7 +46,23 @@ case "$1" in
     echo "Login Succeeded"
     ;;
   image)
-    shift; [ "$1" = inspect ] && shift
+    shift
+    # image ls --format '{{.Repository}}:{{.Tag}}': o nome de volta a partir do arquivo
+    # (reg_porta_ncommerce_api_tag -> reg:porta/ncommerce/api:tag; mysql_8.0 -> mysql:8.0).
+    if [ "$1" = ls ]; then
+      for f in "$S"/images/*; do
+        [ -e "$f" ] || continue
+        n="$(basename "$f")"
+        case "$n" in
+          *_ncommerce_api_*|*_ncommerce_web_*)
+            reg="${n%%_ncommerce_*}"; rest="${n#*_ncommerce_}"
+            echo "$(echo "$reg" | sed 's/_\([0-9]*\)$/:\1/')/ncommerce/${rest%%_*}:${rest#*_}" ;;
+          *) echo "$n" | sed 's/_/:/' ;;
+        esac
+      done
+      exit 0
+    fi
+    [ "$1" = inspect ] && shift
     fmt=""; [ "$1" = "-f" ] && { fmt="$2"; shift 2; }
     f="$(ref_file "$1")"
     if [ ! -f "$f" ]; then
@@ -64,7 +80,30 @@ case "$1" in
     echo "$id" > "$(ref_file "$dst")"
     ;;
   rmi) rm -f "$(ref_file "$2")" ;;
-  volume) [ -f /env/.env.production ] && echo ncommerce_api_env; exit 0 ;;
+  volume)
+    # Volumes de mentira (desinstalador): pastas em /fake/state/volumes.
+    if [ "${2:-}" = rm ]; then
+      shift 2
+      for v in "$@"; do rm -rf "${S:?}/volumes/$v"; done
+      exit 0
+    fi
+    if [ -n "$(ls -A "$S/volumes" 2>/dev/null)" ]; then
+      want="$(echo "$*" | sed -n 's/.*compose\.volume=\([a-z_]*\).*/\1/p')"
+      proj="$(echo "$*" | sed -n 's/.*compose\.project=\([a-z0-9_-]*\).*/\1/p')"
+      for d in "$S"/volumes/*; do
+        n="$(basename "$d")"
+        [ -z "$proj" ] || [ "${n#"${proj}"_}" != "$n" ] || continue
+        [ -z "$want" ] || [ "$n" = "ncommerce_$want" ] || continue
+        echo "$n"
+      done
+      exit 0
+    fi
+    [ -f /env/.env.production ] && echo ncommerce_api_env; exit 0 ;;
+  logout) echo "Removing login credentials for $2" ;;
+  rm)
+    shift; [ "$1" = -f ] && shift
+    for c in "$@"; do rm -f "$S/containers/$c" "$S/containers/$c.status"; done
+    ;;
   start)
     shift
     for c in "$@"; do [ -f "$S/containers/$c" ] && echo running > "$S/containers/$c.status"; done
@@ -72,6 +111,12 @@ case "$1" in
   ps)
     # docker ps -aq --filter label=...project=X --filter label=...service=Y
     svc="$(echo "$*" | sed -n 's/.*compose\.service=\([a-z]*\).*/\1/p')"
+    if [ -z "$svc" ]; then
+      for f in "$S"/containers/*; do
+        case "$f" in *.status) ;; *) [ -e "$f" ] && basename "$f" ;; esac
+      done
+      exit 0
+    fi
     [ -f "$S/containers/$svc" ] && echo "$svc"
     exit 0
     ;;
@@ -91,8 +136,20 @@ case "$1" in
     esac
     ;;
   run)
-    # token no volume parado, ou ultima migration de uma imagem
+    # token no volume parado, ultima migration de uma imagem, ou copia de volume (desinstalador)
     case "$*" in
+      *"tar czf"*)
+        [ ! -e "$K/tar_fail" ] || { echo "tar: write error" >&2; exit 1; }
+        vol=""; dst=""; prev=""
+        for a in "$@"; do
+          if [ "$prev" = "-v" ]; then
+            case "$a" in *:/v:ro) vol="${a%:/v:ro}" ;; *:/b) dst="${a%:/b}" ;; esac
+          fi
+          prev="$a"
+        done
+        name="$(echo "$*" | sed -n 's#.*/b/\([a-z_]*\)\.tar\.gz.*#\1#p')"
+        tar czf "$dst/$name.tar.gz" -C "$S/volumes/$vol" .
+        ;;
       *db/migrate*)
         for a in "$@"; do case "$a" in sha256:*) knob "migration_$(echo "$a" | tr ':' '_')" ;; esac; done
         ;;
@@ -180,6 +237,11 @@ case "$1" in
         if take cp_fail; then echo "cp failed" >&2; exit 1; fi
         mkdir -p "$(dirname "$dst")" 2>/dev/null
         cp -a "$src" "$dst"
+        ;;
+      down)
+        if take down_fail; then echo "down: device or resource busy" >&2; exit 1; fi
+        for f in "$S"/containers/*; do [ -e "$f" ] && rm -f "$f"; done
+        case " $* " in *" --volumes "*|*" -v "*) rm -rf "${S:?}"/volumes/ncommerce_* ;; esac
         ;;
       restart|logs|images|stop) exit 0 ;;
       *) echo "fake docker compose: $sub nao implementado" >&2; exit 64 ;;

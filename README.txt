@@ -117,7 +117,44 @@ Recomendado
   - Nao desligar o servidor durante o expediente.
 
 
-6. PASTA advanced/
+6. DESINSTALAR
+-------------
+
+Use o desinstalador da mesma pasta do instalador:
+
+  - Windows: DesinstaladorWindows.bat (duplo clique; ele pede administrador)
+  - Linux:   ./desinstalador_linux.sh  (no terminal, SEM sudo)
+  - Instalacao nativa (sem Docker, Ubuntu ou WSL): ./advanced/desinstalador_nativo.sh
+
+Ele mostra tudo o que vai remover e pede para digitar DESINSTALAR. Qualquer
+outra resposta cancela sem mudar nada.
+
+Antes de remover, ele guarda uma COPIA da loja numa pasta fora da instalacao e
+diz onde ficou: o banco de dados (dump), o .env e as configuracoes, o
+certificado e as notas, as impressoras, as imagens e os documentos. Se a copia
+falhar, nada e removido. A copia tem senhas e o certificado digital: guarde em
+lugar seguro.
+  Linux:   ~/ncommerce-backup-desinstalacao-<data>  (outra pasta: --backup-em PASTA)
+  Windows: C:\NCommerce-backup-desinstalacao-<data>  (outra pasta ou pen drive: -PastaBackup E:\)
+
+Remove so o que o instalador criou: containers, volumes e imagens do NCommerce,
+servicos e tarefas agendadas do NCommerce, a pasta da instalacao, os atalhos e
+os ajustes que ele fez no sistema. Docker, AnyDesk, SSH, WSL e o resto ficam: o
+instalador nao registra se ja existiam antes. No fim aparece a lista do que
+ficou, para remover a mao se quiser.
+
+Pode ser interrompido e rodado de novo: continua de onde parou e nao refaz a
+copia.
+
+Opcoes:
+  Linux:   --simular     so mostra o que faria (nao muda nada, nao pede confirmacao)
+           --sem-backup  remove SEM a copia (os dados da loja se perdem)
+  Windows: -Simular e -SemBackup, do mesmo jeito (ex.: DesinstaladorWindows.bat -Simular)
+
+Antes de desinstalar uma loja em uso, fale com o suporte NCommerce.
+
+
+7. PASTA advanced/
 ------------------
 
 Uso do suporte. Tem o instalador sem Docker (instalador_nativo.sh), a

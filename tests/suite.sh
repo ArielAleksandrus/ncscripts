@@ -711,4 +711,213 @@ if want volta; then
   check "estado limpo" [ ! -e /opt/ncommerce/control/update.state ]
 fi
 
+
+# ---------------------------------------------------------- desinstalar
+
+# Loja instalada com volumes de mentira (banco, certificado, .env da API, log).
+store_to_uninstall() {
+  installed_store || return 1
+  local v=/fake/state/volumes
+  mkdir -p "$v/ncommerce_mysql_data" "$v/ncommerce_nfce_data" "$v/ncommerce_api_env" "$v/ncommerce_api_log" \
+    "$v/ncommerce_cups_data" "$v/outro_dados"
+  echo "certificado" > "$v/ncommerce_nfce_data/certificado.pfx"
+  echo "NCOMMERCE_SERVER_TOKEN=tok123" > "$v/ncommerce_api_env/.env.production"
+  echo "log" > "$v/ncommerce_api_log/production.log"
+  echo "<Printer x>" > "$v/ncommerce_cups_data/printers.conf"
+  echo "nao e do ncommerce" > "$v/outro_dados/arquivo"
+  # Coisas que nao sao do NCommerce e devem ficar.
+  echo sha256:nginx > /fake/state/images/nginx_latest
+  echo sha256:kx > /fake/state/images/127.0.0.1_5050_ncommerce_api_keep-v0
+  printf '[Unit]\n' > /etc/systemd/system/outro.service
+  printf '[Desktop Entry]\n' > "$HOME/Desktop/Outro.desktop"
+  : > /fake/calls.log
+}
+
+backup_dir() { find "$HOME" -maxdepth 1 -name 'ncommerce-backup-desinstalacao-*' | head -n 1; }
+nothing_removed() {
+  [ -f /opt/ncommerce/docker-compose.yml ] && [ -d /fake/state/volumes/ncommerce_mysql_data ] \
+    && [ -f /fake/state/containers/api ] && [ -f /etc/systemd/system/ncommerce-anydesk-id.service ] \
+    && [ -f /fake/state/images/127.0.0.1_5050_ncommerce_api_latest ]
+}
+gz_dump_ok() { gzip -dc "$1" | tail -c 300 | grep -q "Dump completed"; }
+
+if want desinstalar; then
+  t "desinstalar: --simular lista e nao muda nada"
+  store_to_uninstall
+  run_uninstaller --simular
+  check "termina" [ "$RC" = "0" ]
+  check "mostra a copia, o compose down, as imagens e a pasta" \
+    bash -c 'grep -q "\[simular\] copia do banco" /tmp/out.txt && grep -q "\[simular\] copia do volume ncommerce_nfce_data" /tmp/out.txt && grep -q "\[simular\] desligar e apagar os containers" /tmp/out.txt && grep -q "\[simular\] apagar a imagem 127.0.0.1:5050/ncommerce/api:latest" /tmp/out.txt && grep -q "\[simular\] apagar a pasta /opt/ncommerce" /tmp/out.txt'
+  check "nao copia o banco cru nem o log" bash -c '! grep -q "volume ncommerce_mysql_data\|volume ncommerce_api_log" /tmp/out.txt'
+  check "nao lista o que nao e do NCommerce" bash -c '! grep -q "outro_dados\|nginx\|outro.service\|Outro.desktop" /tmp/out.txt'
+  check "lista o que fica para remover a mao" out_has "remova a mao se quiser"
+  check "diz que nada mudou" out_has "SIMULACAO: nada foi mudado"
+  check "nada removido" nothing_removed
+  check "sem pasta de copia e sem estado" bash -c '[ -z "$(find "$HOME" -maxdepth 1 -name "ncommerce-backup-desinstalacao-*")" ] && [ ! -e "$HOME/.ncommerce-desinstalacao" ]'
+  check "nenhum comando que muda" bash -c '! grep -qE "compose down|docker rmi|docker volume rm|mysqldump|systemctl disable|rm -rf" /fake/calls.log'
+
+  t "desinstalar: resposta diferente de DESINSTALAR cancela"
+  STDIN_TEXT=$'desinstalar\n' run_uninstaller
+  check "sai com erro" [ "$RC" != "0" ]
+  check "avisa" out_has "Cancelado. Nada foi removido."
+  check "nada removido" nothing_removed
+  check "sem copia" [ -z "$(backup_dir)" ]
+
+  t "desinstalar: copia falha -> para sem remover; de novo, termina"
+  knob dump_fail
+  STDIN_TEXT=$'DESINSTALAR\n' run_uninstaller
+  check "falha" [ "$RC" != "0" ]
+  check "explica" out_has "Nada foi removido."
+  check "nada removido" nothing_removed
+  check "copia marcada incompleta" [ -e "$(backup_dir)/INCOMPLETO" ]
+  unknob dump_fail
+  rm -rf "$(backup_dir)"
+  STDIN_TEXT=$'DESINSTALAR\n' run_uninstaller
+  check "termina" [ "$RC" = "0" ] && out_has "DESINSTALACAO CONCLUIDA"
+
+  t "desinstalar: desinstala com copia"
+  store_to_uninstall
+  STDIN_TEXT=$'DESINSTALAR\n' run_uninstaller
+  b="$(backup_dir)"
+  check "termina" [ "$RC" = "0" ] && out_has "DESINSTALACAO CONCLUIDA"
+  check "diz onde ficou a copia" out_has "Copia da loja (banco, configuracoes e arquivos): $b"
+  check "dump completo" gz_dump_ok "$b/banco-ncommerce_api_production.sql.gz"
+  check "certificado na copia" bash -c "tar xzf '$b/volumes/nfce_data.tar.gz' -O ./certificado.pfx | grep -q certificado"
+  check ".env da API na copia" bash -c "tar xzf '$b/volumes/api_env.tar.gz' -O ./.env.production | grep -q tok123"
+  check "impressoras na copia" [ -f "$b/volumes/cups_data.tar.gz" ]
+  check "sem banco cru, log nem volume alheio" bash -c "[ ! -e '$b/volumes/mysql_data.tar.gz' ] && [ ! -e '$b/volumes/api_log.tar.gz' ] && [ ! -e '$b/volumes/outro_dados.tar.gz' ]"
+  check "configuracoes na copia" bash -c "grep -q '^NCOMMERCE_REGISTRY=' '$b/instalacao/.env' && [ -f '$b/instalacao/docker-compose.yml' ] && [ -f '$b/LEIA-ME.txt' ] && [ ! -e '$b/INCOMPLETO' ]"
+  check "copia so do usuario" [ "$(stat -c %a "$b")" = "700" ]
+  check "containers e volumes do NCommerce apagados" bash -c '[ -z "$(ls /fake/state/containers)" ] && [ ! -e /fake/state/volumes/ncommerce_mysql_data ] && [ ! -e /fake/state/volumes/ncommerce_nfce_data ]'
+  check "imagens do NCommerce apagadas, inclusive keep-" bash -c '! ls /fake/state/images | grep -q ncommerce_'
+  check "servicos apagados" bash -c '! ls /etc/systemd/system | grep -q "^ncommerce-"'
+  check "pasta, atalho e progresso apagados" bash -c "[ ! -e /opt/ncommerce ] && [ ! -e '$HOME/Desktop/Atualizar NCommerce.desktop' ] && [ ! -e '$HOME/.ncommerce-docker' ] && [ ! -e '$HOME/.ncommerce-desinstalacao' ]"
+  check "regra do CUPS e keepalive do SSH desfeitos" bash -c '[ ! -e /etc/udev/rules.d/70-printers.rules ] && [ ! -e /etc/ssh/sshd_config.d/ncommerce-keepalive.conf ]'
+  check "o que nao e do NCommerce ficou" bash -c "[ -d /fake/state/volumes/outro_dados ] && [ -f /fake/state/images/nginx_latest ] && [ -f /fake/state/images/mysql_8.0 ] && [ -f /etc/systemd/system/outro.service ] && [ -f '$HOME/Desktop/Outro.desktop' ] && [ -f /etc/ssh/sshd_config ]"
+  check "plugins ficam (e estao na copia)" bash -c "[ -d '$HOME/Documents/ncommerce/plugins' ] && [ -d '$b/plugins' ]"
+  check "lista a mao: Docker e imagem generica" bash -c 'grep -q "Docker (o instalador" /tmp/out.txt && grep -q "imagem Docker mysql:8.0" /tmp/out.txt'
+  check "log da desinstalacao fica" bash -c 'ls "$HOME"/ncommerce-logs/desinstalacao-*.log >/dev/null 2>&1'
+  run_uninstaller --simular
+  check "rodar de novo: nada a fazer" out_has "Nao achei a versao Docker"
+
+  t "desinstalar: interrompida depois da copia continua sem copiar de novo"
+  store_to_uninstall
+  knob down_fail 1
+  STDIN_TEXT=$'DESINSTALAR\n' run_uninstaller
+  check "falha no compose down" [ "$RC" != "0" ] && out_has "A copia da loja ja esta em:"
+  check "volumes ainda existem" [ -d /fake/state/volumes/ncommerce_mysql_data ]
+  STDIN_TEXT=$'DESINSTALAR\n' run_uninstaller
+  check "termina" [ "$RC" = "0" ] && out_has "DESINSTALACAO CONCLUIDA"
+  check "avisa que a copia ja existia" out_has "A copia ja foi feita numa execucao anterior"
+  check "uma copia so" [ "$(grep -c '^mysqldump' /fake/calls.log)" = "1" ] && [ "$(find "$HOME" -maxdepth 1 -name 'ncommerce-backup-desinstalacao-*' | wc -l)" = "1" ]
+  check "volumes apagados" [ ! -e /fake/state/volumes/ncommerce_mysql_data ]
+
+  t "desinstalar: --sem-backup apaga sem copia, com aviso"
+  store_to_uninstall
+  STDIN_TEXT=$'DESINSTALAR\n' run_uninstaller --sem-backup
+  check "termina" [ "$RC" = "0" ]
+  check "avisa" out_has "SEM COPIA (--sem-backup)" && out_has "APAGADOS SEM COPIA"
+  check "sem dump e sem pasta de copia" bash -c '! grep -q mysqldump /fake/calls.log' && [ -z "$(backup_dir)" ]
+  check "removido" [ ! -e /opt/ncommerce ]
+
+  t "desinstalar: --backup-em dentro da instalacao e recusado; fora, a copia vai para la"
+  store_to_uninstall
+  run_uninstaller --backup-em /opt/ncommerce/x
+  check "recusa" [ "$RC" != "0" ] && out_has "nao pode ficar dentro de /opt/ncommerce"
+  mkdir -p /tmp/backups-teste
+  STDIN_TEXT=$'DESINSTALAR\n' run_uninstaller --backup-em /tmp/backups-teste
+  check "copia na pasta pedida" bash -c 'ls /tmp/backups-teste/ncommerce-backup-desinstalacao-*/banco-ncommerce_api_production.sql.gz >/dev/null 2>&1'
+
+  t "desinstalar: nao roda com o instalador ou uma atualizacao aberta"
+  store_to_uninstall
+  ( exec 9>>"$HOME/.ncommerce-docker/instalador.lock"; flock 9; sleep 3 ) &
+  holder=$!
+  sleep 0.5
+  STDIN_TEXT=$'DESINSTALAR\n' run_uninstaller
+  check "recusa" [ "$RC" = "2" ] && out_has "esta rodando agora"
+  check "nada removido" nothing_removed
+  kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
+fi
+
+
+# Instalacao nativa de mentira: ~/NCommerce, banco, nginx, cron e /etc/environment (num arquivo de teste).
+native_store() {
+  reset_all
+  rm -rf "$HOME/NCommerce" "$HOME/.ncommerce-progress" "$HOME/.ncommerce-desinstalacao-nativo" /etc/nginx/sites-available
+  local api="$HOME/NCommerce/ncommerce_api"
+  mkdir -p "$api/essentials/config" "$api/node_modules/x" "$api/log" "$HOME/.ncommerce-progress" /etc/nginx/sites-available
+  printf 'NCOMMERCE_SERVER_TOKEN=tok123\nSECRET_KEY_BASE=abc\n' > "$api/.env.production"
+  echo "certificado" > "$api/essentials/config/dados_emitente.json"
+  echo "lixo" > "$api/node_modules/x/a.js"
+  echo "log" > "$api/log/production.log"
+  touch "$HOME/.ncommerce-progress/step7.done"
+  printf 'PATH=/usr/bin\nNCOMMERCE_SERVER_TOKEN=tok123\nSECRET_KEY_BASE=abc\nOUTRA=1\n' > /tmp/environment-teste
+  for site in ncommerce ncommerce-api outro; do
+    echo "server {}" > "/etc/nginx/sites-available/$site"
+    ln -sf "/etc/nginx/sites-available/$site" "/etc/nginx/sites-enabled/$site"
+  done
+  printf '* * * * * %s/vendor/scripts/chown_files.sh %s\n0 1 * * * /usr/bin/outro\n' "$api" "$api" > /fake/state/crontab-user
+  touch /fake/state/native_db /fake/state/native_db_user
+  printf '[Desktop Entry]\n' > "$HOME/Desktop/Restauracao.desktop"
+  : > /fake/calls.log
+}
+
+run_native_uninstaller() {
+  RC=0
+  printf '%s' "${STDIN_TEXT:-}" | NCOMMERCE_ENVIRONMENT_FILE=/tmp/environment-teste \
+    bash "$SRC/advanced/desinstalador_nativo.sh" "$@" > "$OUT" 2>&1 || RC=$?
+}
+
+native_untouched() {
+  [ -f "$HOME/NCommerce/ncommerce_api/.env.production" ] && [ -e /fake/state/native_db ] \
+    && grep -q tok123 /tmp/environment-teste && grep -q chown_files /fake/state/crontab-user \
+    && [ -e /etc/nginx/sites-enabled/ncommerce-api ]
+}
+
+if want desinstalar_nativo; then
+  t "desinstalar_nativo: --simular lista e nao muda nada"
+  native_store
+  run_native_uninstaller --simular
+  check "termina" [ "$RC" = "0" ] && out_has "SIMULACAO: nada foi mudado"
+  check "lista copia, nginx, cron, banco, environment e pasta" bash -c 'grep -q "\[simular\] copia do banco ncommerce_api_production" /tmp/out.txt && grep -q "\[simular\] tirar o site ncommerce-api do nginx" /tmp/out.txt && grep -q "\[simular\] tirar do cron do loja" /tmp/out.txt && grep -q "\[simular\] apagar o banco" /tmp/out.txt && grep -q "\[simular\] tirar do /tmp/environment-teste" /tmp/out.txt && grep -q "\[simular\] apagar a pasta /home/loja/NCommerce" /tmp/out.txt'
+  check "nao lista o site alheio" bash -c '! grep -q "site outro" /tmp/out.txt'
+  check "lista o que fica (Ruby)" out_has "Ruby (rbenv"
+  check "nada mudou" native_untouched
+  check "sem copia, sem estado e sem DROP" bash -c '[ -z "$(find "$HOME" -maxdepth 1 -name "ncommerce-backup-desinstalacao-*")" ] && [ ! -e "$HOME/.ncommerce-desinstalacao-nativo" ] && ! grep -qE "DROP|^mysqldump" /fake/calls.log'
+
+  t "desinstalar_nativo: cancelar nao muda nada"
+  STDIN_TEXT=$'nao\n' run_native_uninstaller
+  check "cancela" [ "$RC" != "0" ] && out_has "Cancelado. Nada foi removido."
+  check "nada mudou e nada sobrou" bash -c '[ ! -e "$HOME/.ncommerce-desinstalacao-nativo" ]' && native_untouched
+
+  t "desinstalar_nativo: copia falha -> nada removido; de novo, termina"
+  knob dump_fail
+  STDIN_TEXT=$'DESINSTALAR\n' run_native_uninstaller
+  check "falha e explica" [ "$RC" != "0" ] && out_has "Nada foi removido."
+  check "nada mudou" native_untouched
+  unknob dump_fail
+  STDIN_TEXT=$'DESINSTALAR\n' run_native_uninstaller
+  check "termina" [ "$RC" = "0" ] && out_has "DESINSTALACAO CONCLUIDA"
+
+  t "desinstalar_nativo: desinstala com copia"
+  native_store
+  STDIN_TEXT=$'DESINSTALAR\n' run_native_uninstaller
+  b="$(backup_dir)"
+  check "termina" [ "$RC" = "0" ] && out_has "DESINSTALACAO CONCLUIDA" && out_has "$b"
+  check "dump completo" gz_dump_ok "$b/banco-ncommerce_api_production.sql.gz"
+  check "arquivos na copia, sem node_modules e log" bash -c "tar tzf '$b/arquivos-NCommerce.tar.gz' > /tmp/lista && grep -q 'essentials/config/dados_emitente.json' /tmp/lista && ! grep -q node_modules /tmp/lista && ! grep -q 'log/production.log' /tmp/lista"
+  check "configuracoes na copia" bash -c "grep -q tok123 '$b/config/env.production' && grep -q OUTRA '$b/config/environment' && [ -f '$b/config/nginx/ncommerce-api' ] && grep -q chown_files '$b/config/cron.txt'"
+  check "pasta, progresso e atalho apagados" bash -c "[ ! -e '$HOME/NCommerce' ] && [ ! -e '$HOME/.ncommerce-progress' ] && [ ! -e '$HOME/Desktop/Restauracao.desktop' ] && [ ! -e '$HOME/.ncommerce-desinstalacao-nativo' ]"
+  check "banco e usuario do MySQL apagados" bash -c '[ ! -e /fake/state/native_db ] && [ ! -e /fake/state/native_db_user ]'
+  check "cron: so a linha do NCommerce saiu" bash -c '! grep -q chown_files /fake/state/crontab-user && grep -q /usr/bin/outro /fake/state/crontab-user'
+  check "environment: so as linhas do .env sairam" bash -c '! grep -q tok123 /tmp/environment-teste && grep -qx PATH=/usr/bin /tmp/environment-teste && grep -qx OUTRA=1 /tmp/environment-teste'
+  check "nginx: so os sites do NCommerce sairam" bash -c '[ ! -e /etc/nginx/sites-enabled/ncommerce-api ] && [ ! -e /etc/nginx/sites-available/ncommerce ] && [ -e /etc/nginx/sites-enabled/outro ]'
+
+  t "desinstalar_nativo: --sem-backup"
+  native_store
+  STDIN_TEXT=$'DESINSTALAR\n' run_native_uninstaller --sem-backup
+  check "termina sem copia" [ "$RC" = "0" ] && out_has "APAGADOS SEM COPIA" && [ -z "$(backup_dir)" ]
+  check "removido" bash -c '[ ! -e "$HOME/NCommerce" ] && [ ! -e /fake/state/native_db ] && ! grep -q tok123 /tmp/environment-teste'
+fi
+
 summary

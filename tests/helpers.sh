@@ -28,6 +28,7 @@ reset_all() {
   pkill -f 'sleep 3600' 2>/dev/null || true
   sleep 0.3
   rm -rf /opt/ncommerce "$HOME/.ncommerce-docker" "$HOME/ncommerce-logs" "$HOME/.config" \
+    "$HOME/.ncommerce-desinstalacao" "$HOME"/ncommerce-backup-desinstalacao-* /tmp/backups-teste \
     /fake/state /fake/knobs /fake/calls.log /fake/master-backup.zip /fake/ncscripts.tar.gz \
     /etc/nginx/sites-enabled/* /etc/systemd/system/* /etc/udev/rules.d/* "$HOME/Desktop" "$HOME/Documents" \
     "$(dirname "$SRC")" /tmp/out.txt /tmp/zip
@@ -66,6 +67,12 @@ make_backup() {
 run_installer() {
   RC=0
   printf '%s' "${STDIN_TEXT:-}" | bash "$SRC/instalador_linux.sh" "$@" > "$OUT" 2>&1 || RC=$?
+}
+
+# run_uninstaller [opcoes]: o desinstalador da copia extraida. STDIN_TEXT vira o teclado.
+run_uninstaller() {
+  RC=0
+  printf '%s' "${STDIN_TEXT:-}" | bash "$SRC/desinstalador_linux.sh" "$@" > "$OUT" 2>&1 || RC=$?
 }
 
 # Roda em segundo plano num grupo de processos proprio, com o SIGINT no padrao
