@@ -24,6 +24,48 @@ BeforeAll {
     }
 }
 
+# R19 (respostas da revisao geral)
+Describe "pasta da copia de seguranca" {
+    It "fica so para Administradores e SYSTEM (pelos SIDs, sem heranca)" {
+        $d = New-TestDir
+        $log = Join-Path $d "icacls.log"
+        $fake = Join-Path $d "icacls"
+        [IO.File]::WriteAllText($fake, "#!/bin/sh`necho `"`$@`" >> '$log'`n")
+        & chmod +x $fake
+        $env:NCOMMERCE_ICACLS_EXE = $fake
+        try {
+            Protect-NcBackupDir (Join-Path $d "copia") | Should -BeTrue
+        } finally { Remove-Item Env:NCOMMERCE_ICACLS_EXE }
+        (Get-Content -Raw $log).Trim() | Should -Be "$(Join-Path $d 'copia') /inheritance:r /grant:r *S-1-5-32-544:(OI)(CI)F *S-1-5-18:(OI)(CI)F"
+    }
+
+    It "so avisa quando nao da (pen drive sem permissoes)" {
+        $d = New-TestDir
+        $fake = Join-Path $d "icacls"
+        [IO.File]::WriteAllText($fake, "#!/bin/sh`nexit 5`n")
+        & chmod +x $fake
+        $env:NCOMMERCE_ICACLS_EXE = $fake
+        try {
+            Protect-NcBackupDir (Join-Path $d "copia") | Should -BeFalse
+        } finally { Remove-Item Env:NCOMMERCE_ICACLS_EXE }
+    }
+}
+
+# R18 (respostas da revisao geral): o .bat nao roda no Linux; confere o texto.
+Describe "logon com troca de tipo pela metade" {
+    It "com control\pausa sobe so o banco e avisa, antes de qualquer outra coisa" {
+        $bat = Get-Content -Raw (Join-Path $PSScriptRoot "../../windows/ncommerce-docker-startup.bat")
+        $pausa = $bat.IndexOf('if exist "%DIR%\control\pausa"')
+        $pausa | Should -BeGreaterThan 0
+        $pausa | Should -BeLessThan $bat.IndexOf('if /I "%~1"=="pull"')
+        $pausa | Should -BeLessThan $bat.IndexOf('ncommerce-update.ps1" -Recuperar')
+        $block = $bat.Substring($pausa, $bat.IndexOf("exit /b 0", $pausa) - $pausa)
+        $block | Should -Match 'compose up -d mysql redis'
+        $block | Should -Match 'troca do tipo da loja em andamento'
+        $block | Should -Not -Match 'compose up -d\r?\n'
+    }
+}
+
 Describe "escrita atomica" {
     It "grava, troca e guarda o anterior em .bak" {
         $d = New-TestDir

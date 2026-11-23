@@ -580,6 +580,7 @@ function Save-UninstallBackup {
     } catch {
         Stop-Backup $partial "nao consegui criar a pasta $partial ($($_.Exception.Message))."
     }
+    Protect-NcBackupDir $partial | Out-Null
 
     $dumpName = ""
     $volumes = @()

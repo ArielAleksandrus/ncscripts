@@ -271,12 +271,14 @@ function Invoke-Update {
     }
 
     $newApi = Get-ImageId "$($script:Registry)/ncommerce/api:latest"
-    if ($newApi -and $script:OldApi -and $newApi -ne $script:OldApi -and $env:NCOMMERCE_SKIP_DB_BACKUP -ne "1") {
-        $oldMig = Get-LastMigration $script:OldApi
+    # R20: sem o container da api nao da para saber a versao do banco: copia sempre.
+    if ($newApi -and $newApi -ne $script:OldApi -and $env:NCOMMERCE_SKIP_DB_BACKUP -ne "1") {
+        $oldMig = ""
+        if ($script:OldApi) { $oldMig = Get-LastMigration $script:OldApi }
         $newMig = Get-LastMigration $newApi
         if (-not $oldMig -or $oldMig -ne $newMig) {
             Say "A versao nova muda o banco de dados. Guardando uma copia antes..."
-            if (-not (Save-DatabaseDump "antes-de-atualizar")) {
+            if (-not (Start-MysqlForDump) -or -not (Save-DatabaseDump "antes-de-atualizar")) {
                 Stop-Update "Nao consegui guardar a copia do banco (disco cheio ou banco parado), entao nao atualizei. Chame o suporte NCommerce."
             }
         }
@@ -313,6 +315,8 @@ function Invoke-Update {
     $status = Wait-GuardVerdict
     Invoke-Compose -Arguments @("ps") | Out-Null
     $script:Finished = $true
+    # deu certo (ou esta em teste): a proxima serie de copias comeca do zero (R20)
+    if ($status -ne 1) { Clear-NcDumpSeries "antes-de-atualizar" }
     switch ($status) {
         0 {
             $v = ""
@@ -331,6 +335,21 @@ function Invoke-Update {
             return 0
         }
     }
+}
+
+# R20: o banco liga sozinho para a copia (sem o container da api, ou com a loja
+# parada, a copia era pulada ou falhava).
+function Start-MysqlForDump {
+    $running = @("$(Get-DockerText @('compose', 'ps', '--status', 'running', '--services'))" -split "`n" | ForEach-Object { $_.Trim() })
+    if ($running -contains "mysql") { return $true }
+    Say "O banco de dados estava desligado: ligando so ele para a copia..."
+    if ((Invoke-Compose -Arguments @("up", "-d", "mysql") -Quiet) -ne 0) { return $false }
+    for ($i = 0; $i -lt 30; $i++) {
+        Invoke-ComposeExec exec -T mysql sh -c 'mysqladmin ping -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --silent' | Out-Null
+        if ($LASTEXITCODE -eq 0) { return $true }
+        Start-Sleep -Seconds 2
+    }
+    return $false
 }
 
 # ------------------------------------------------------------------ roteiro
