@@ -6,7 +6,10 @@
 ::   TrocarTipoWindows.bat -Tipo comercio      nao pergunta o tipo
 ::   TrocarTipoWindows.bat -PastaBackup E:\    copia num pen drive
 
-net session >/dev/null 2>&1
+echo %* | findstr /i /c:"-Simular" >nul
+if %errorLevel% equ 0 goto run
+
+net session >nul 2>&1
 if %errorLevel% neq 0 (
     echo Pedindo privilegio de administrador...
     if "%~1"=="" (
@@ -17,6 +20,7 @@ if %errorLevel% neq 0 (
     exit /b
 )
 
+:run
 cd /d "%~dp0.."
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0..\windows\trocar_tipo_windows.ps1" %*
 pause
