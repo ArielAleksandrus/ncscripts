@@ -210,3 +210,37 @@ nao e refeita) e tem modo simular. Nada foi rodado de verdade: so nos containers
   docker, banco nativo no mysql) e `tests/windows/uninstaller.Tests.ps1` (fakes em `tests/windows/fake/`).
 - Nao verificado: nada rodou num Windows nem num Linux de verdade (tarefas agendadas, firewall, docker cp do Docker
   Desktop, .bat/UAC; no Linux: systemd, nmcli, ufw, sshd reais).
+
+## Trocar o tipo da loja (branch `v2-trocar-tipo`, 23/11)
+
+Pedido do Ariel: script para trocar o tipo (restaurante / comercio em geral / industria), fora da raiz, um por sistema.
+A troca APAGA o banco e recria a loja como instalacao nova do tipo novo; o trabalho no banco e das tarefas
+`store:commerce_type:{check,prepare,reset,notify_master}` da API da loja (NOTAS-V2 do ncommerce_api); o mestre
+registra o evento em `POST /companies/commerce_type_change` (NOTAS-V2 do ncommerce_server_api).
+
+- Pasta `manutencao/`: `trocar_tipo_linux.sh` (Docker), `trocar_tipo_nativo.sh` (Ubuntu/WSL sem Docker),
+  `TrocarTipoWindows.bat` -> `windows/trocar_tipo_windows.ps1`. Roteiro comum do Linux em `lib/trocar_tipo.sh`; as
+  funcoes Docker do desinstalador (compose, wait_mysql, dump_to, archive_volume...) foram para `lib/loja_docker.sh` e
+  servem aos dois.
+- Fluxo: aviso (o que some, o que fica) -> tipo (menu 1/2/3 ou `--tipo`/`-Tipo`) -> `check` (recusa com caixa ou
+  comanda aberta, nota nao transmitida ou mesmo tipo; diz quais) -> mestre em dry run (sem mestre, nao comeca) -> plano
+  -> digitar APAGAR TUDO -> desliga a loja (Docker: `control/pausa` + `compose stop guard web api`; nativo: nginx e
+  Sidekiq) -> copia em `~/ncommerce-backup-troca-tipo-<data>` / `C:\NCommerce-backup-troca-tipo-<data>`: dump
+  conferido (gzip + "Dump completed") e RESTAURADO no banco temporario `ncommerce_troca_conferencia`, contagem de
+  linhas de todas as tabelas igual nos dois (arquivos `conferencia-*.txt`), mais configuracao e volumes; qualquer falha
+  para, religa a loja e nada e apagado -> `prepare` (manter.json + notas-fiscais.csv na copia, montada em /troca no
+  `compose run` da API) -> `reset` -> `notify_master` (3 tentativas; se falhar, a troca vale e rodar de novo avisa) ->
+  liga a loja -> mensagem final (copia, tipo novo, admins com a mesma senha, o que configurar de novo, usuarios de
+  exemplo com senha padrao).
+- O rake roda num container de uma vez (`compose run --rm --no-deps -T --entrypoint bash api`), com o
+  `/env/.env.production` carregado e `NFCE_DATA=/data/nfce` (os links de /opt/nfce so existem no entrypoint).
+- Retomada (estado em `~/.ncommerce-troca-tipo` / `C:\ProgramData\NCommerce-troca-tipo`): copia conferida nao e
+  refeita; antes do reset da para desistir (pede APAGAR TUDO de novo; desistir religa a loja e limpa o estado, a copia
+  fica); reset interrompido deixa a loja desligada e rodar de novo refaz o reset a partir do manter.json (o reset e
+  idempotente); outro tipo com troca em andamento e recusado. `--simular`/`-Simular` mostra aviso, conferencia e plano.
+  Trava: a do instalador (`~/.ncommerce-docker/instalador.lock`, mutex `Global\NCommerceInstalador`).
+- Desinstaladores alinhados: o Linux agora tambem apaga `Documentos/ncommerce/plugins` (ja vai na copia), o LEIA-ME ao
+  lado e a pasta de cima se ficar vazia; pasta de plugins fora do lugar padrao fica na lista "remova a mao".
+- Testes: `tests/run.sh trocar_tipo` (Docker + nativo; fakes novos: `tests/fake/troca_rake.sh`, `bundle`, `compose
+  run`, banco temporario e contagens no `mysql`) e `tests/windows/trocar_tipo.Tests.ps1`. Nada rodou num Linux ou
+  Windows de verdade, nem contra uma API real (o rake e de mentira nos testes; as tarefas tem specs proprias na API).

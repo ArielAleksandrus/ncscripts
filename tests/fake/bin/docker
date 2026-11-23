@@ -243,6 +243,24 @@ case "$1" in
         for f in "$S"/containers/*; do [ -e "$f" ] && rm -f "$f"; done
         case " $* " in *" --volumes "*|*" -v "*) rm -rf "${S:?}"/volumes/ncommerce_* ;; esac
         ;;
+      run)
+        # Troca de tipo: rake da API num container de uma vez (tests/fake/troca_rake.sh).
+        map=""; prev=""; rake=""
+        for a in "$@"; do
+          if [ -n "$rake" ]; then rake="$rake
+$a"; continue; fi
+          case "$a" in store:commerce_type:*) rake="$a"; continue ;; esac
+          if [ "$prev" = "-v" ]; then case "$a" in *:/troca) map="/troca=${a%:/troca}" ;; esac; fi
+          prev="$a"
+        done
+        [ -n "$rake" ] || { echo "fake docker compose run: sem rake" >&2; exit 64; }
+        old_ifs="$IFS"; IFS='
+'
+        # shellcheck disable=SC2086
+        set -- $rake
+        IFS="$old_ifs"
+        TROCA_MAP="$map" exec /repo/tests/fake/troca_rake.sh "$@"
+        ;;
       restart|logs|images|stop) exit 0 ;;
       *) echo "fake docker compose: $sub nao implementado" >&2; exit 64 ;;
     esac

@@ -139,7 +139,8 @@ lugar seguro.
 
 Remove so o que o instalador criou: containers, volumes e imagens do NCommerce,
 servicos e tarefas agendadas do NCommerce, a pasta da instalacao, os atalhos e
-os ajustes que ele fez no sistema. Docker, AnyDesk, SSH, WSL e o resto ficam: o
+os ajustes que ele fez no sistema e a pasta Documentos/ncommerce/plugins (ja
+vai na copia). Docker, AnyDesk, SSH, WSL e o resto ficam: o
 instalador nao registra se ja existiam antes. No fim aparece a lista do que
 ficou, para remover a mao se quiser.
 
@@ -154,7 +155,48 @@ Opcoes:
 Antes de desinstalar uma loja em uso, fale com o suporte NCommerce.
 
 
-7. PASTA advanced/
+7. TROCAR O TIPO DA LOJA (restaurante / comercio em geral / industria)
+----------------------------------------------------------------------
+
+O tipo vem do cadastro e nao muda pela tela. Para trocar, use o script da pasta
+manutencao/ (o mesmo zip do instalador):
+
+  - Windows: manutencao\TrocarTipoWindows.bat (duplo clique; ele pede administrador)
+  - Linux:   ./manutencao/trocar_tipo_linux.sh  (no terminal, SEM sudo)
+  - Instalacao nativa (sem Docker, Ubuntu ou WSL): ./manutencao/trocar_tipo_nativo.sh
+
+ATENCAO: a troca APAGA TODO O BANCO DE DADOS e recria a loja como uma instalacao
+nova do tipo escolhido. Somem: produtos, categorias, comandas, pedidos, vendas,
+caixas, clientes, fornecedores, estoque, reservas, cardapios, usuarios que nao
+sao administradores e as opcoes da loja. Ficam: os dados da empresa (nome, CNPJ,
+endereco, contatos, logo, responsaveis), os ADMINISTRADORES com a MESMA senha, a
+configuracao da NFC-e (CSC, serie, ambiente, certificado) e a NUMERACAO dela (a
+proxima nota continua de onde parou), as notas (XML) no computador, a conexao com
+o mestre, o tunel, o iFood conectado e as impressoras instaladas.
+
+O script:
+  1. avisa o que some e o que fica, pergunta o tipo novo e pede para digitar
+     APAGAR TUDO;
+  2. recusa se houver caixa aberto, comanda aberta ou nota fiscal ainda nao
+     transmitida (diz quais) e se o mestre nao responder;
+  3. desliga a loja e faz uma COPIA do banco fora da instalacao, conferida:
+     restaurada num banco temporario e comparada tabela por tabela. Se falhar,
+     nada e apagado e a loja volta a ligar;
+       Linux:   ~/ncommerce-backup-troca-tipo-<data>  (outra pasta: --backup-em PASTA)
+       Windows: C:\NCommerce-backup-troca-tipo-<data> (outra pasta: -PastaBackup E:\)
+  4. recria o banco do tipo novo e repoe o que fica;
+  5. avisa o mestre (registra quem, quando e de qual para qual tipo) e liga a loja.
+
+Pode ser interrompido e rodado de novo: continua de onde parou, sem refazer a
+copia. Enquanto nada foi apagado ainda da para desistir. Se parar no meio do
+reset, a loja fica desligada ate rodar de novo.
+
+Opcoes: --simular / -Simular (so mostra), --tipo / -Tipo restaurante|comercio|industria.
+A loja precisa estar numa versao do NCommerce com a troca de tipo (se nao,
+o script pede para atualizar antes). Faca com o suporte NCommerce.
+
+
+8. PASTA advanced/
 ------------------
 
 Uso do suporte. Tem o instalador sem Docker (instalador_nativo.sh), a

@@ -1,12 +1,34 @@
 #!/bin/sh
 echo "mysql $*" >> /fake/calls.log
+M=/fake/state/mysql
+mkdir -p "$M"
+[ -f "$M/ncommerce_api_production.counts" ] || printf 'bills\t30\nproducts\t12\nusers\t5\n' > "$M/ncommerce_api_production.counts"
 case "$*" in
+  # Conferencia da copia da troca de tipo: banco temporario e contagem de linhas.
+  *"information_schema.tables"*)
+    db="$(echo "$*" | sed -n "s/.*table_schema = '\([a-z_]*\)'.*/\1/p")"
+    echo "COUNT $db"; exit 0 ;;
+  *"CREATE DATABASE"*ncommerce_troca_conferencia*)
+    [ ! -e /fake/knobs/conf_create_fail ] || exit 1
+    rm -f "$M/ncommerce_troca_conferencia.counts"; exit 0 ;;
+  *"DROP DATABASE"*ncommerce_troca_conferencia*) rm -f "$M/ncommerce_troca_conferencia.counts"; exit 0 ;;
+  *" ncommerce_troca_conferencia"|ncommerce_troca_conferencia)
+    cat > /dev/null
+    [ ! -e /fake/knobs/restore_fail ] || exit 1
+    cp "$M/ncommerce_api_production.counts" "$M/ncommerce_troca_conferencia.counts"
+    [ ! -e /fake/knobs/restore_mismatch ] || printf 'bills\t29\nproducts\t12\nusers\t5\n' > "$M/ncommerce_troca_conferencia.counts"
+    exit 0 ;;
+  "-N"|*" -N")
+    read -r cmd db rest || true
+    db="${db%;}"
+    [ "$cmd" = COUNT ] && cat "$M/$db.counts" 2>/dev/null
+    exit 0 ;;
   # Instalacao nativa de mentira (desinstalador_nativo.sh).
   *"SHOW DATABASES"*) [ -e /fake/state/native_db ] && echo ncommerce_api_production; exit 0 ;;
   *"FROM mysql.user"*) [ -e /fake/state/native_db_user ] && echo 1; exit 0 ;;
   *"DROP DATABASE"*) rm -f /fake/state/native_db; exit 0 ;;
   *"DROP USER"*) rm -f /fake/state/native_db_user; exit 0 ;;
-  *" -e "*) exit 0 ;;
+  *" -e "*|"-e "*) exit 0 ;;
 esac
 s="$(cat /fake/knobs/mysql_sleep 2>/dev/null)"; [ -z "$s" ] || sleep "$s"
 [ ! -e /fake/knobs/mysql_fail ] || exit 1

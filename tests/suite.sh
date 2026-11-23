@@ -750,6 +750,7 @@ if want desinstalar; then
     bash -c 'grep -q "\[simular\] copia do banco" /tmp/out.txt && grep -q "\[simular\] copia do volume ncommerce_nfce_data" /tmp/out.txt && grep -q "\[simular\] desligar e apagar os containers" /tmp/out.txt && grep -q "\[simular\] apagar a imagem 127.0.0.1:5050/ncommerce/api:latest" /tmp/out.txt && grep -q "\[simular\] apagar a pasta /opt/ncommerce" /tmp/out.txt'
   check "nao copia o banco cru nem o log" bash -c '! grep -q "volume ncommerce_mysql_data\|volume ncommerce_api_log" /tmp/out.txt'
   check "nao lista o que nao e do NCommerce" bash -c '! grep -q "outro_dados\|nginx\|outro.service\|Outro.desktop" /tmp/out.txt'
+  check "mostra a pasta de plugins" out_has "[simular] apagar a pasta de plugins $HOME/Documents/ncommerce/plugins"
   check "lista o que fica para remover a mao" out_has "remova a mao se quiser"
   check "diz que nada mudou" out_has "SIMULACAO: nada foi mudado"
   check "nada removido" nothing_removed
@@ -794,7 +795,7 @@ if want desinstalar; then
   check "pasta, atalho e progresso apagados" bash -c "[ ! -e /opt/ncommerce ] && [ ! -e '$HOME/Desktop/Atualizar NCommerce.desktop' ] && [ ! -e '$HOME/.ncommerce-docker' ] && [ ! -e '$HOME/.ncommerce-desinstalacao' ]"
   check "regra do CUPS e keepalive do SSH desfeitos" bash -c '[ ! -e /etc/udev/rules.d/70-printers.rules ] && [ ! -e /etc/ssh/sshd_config.d/ncommerce-keepalive.conf ]'
   check "o que nao e do NCommerce ficou" bash -c "[ -d /fake/state/volumes/outro_dados ] && [ -f /fake/state/images/nginx_latest ] && [ -f /fake/state/images/mysql_8.0 ] && [ -f /etc/systemd/system/outro.service ] && [ -f '$HOME/Desktop/Outro.desktop' ] && [ -f /etc/ssh/sshd_config ]"
-  check "plugins ficam (e estao na copia)" bash -c "[ -d '$HOME/Documents/ncommerce/plugins' ] && [ -d '$b/plugins' ]"
+  check "plugins saem, como no Windows (e estao na copia)" bash -c "[ ! -e '$HOME/Documents/ncommerce/plugins' ] && [ -d '$b/plugins' ]"
   check "lista a mao: Docker e imagem generica" bash -c 'grep -q "Docker (o instalador" /tmp/out.txt && grep -q "imagem Docker mysql:8.0" /tmp/out.txt'
   check "log da desinstalacao fica" bash -c 'ls "$HOME"/ncommerce-logs/desinstalacao-*.log >/dev/null 2>&1'
   run_uninstaller --simular
@@ -918,6 +919,215 @@ if want desinstalar_nativo; then
   STDIN_TEXT=$'DESINSTALAR\n' run_native_uninstaller --sem-backup
   check "termina sem copia" [ "$RC" = "0" ] && out_has "APAGADOS SEM COPIA" && [ -z "$(backup_dir)" ]
   check "removido" bash -c '[ ! -e "$HOME/NCommerce" ] && [ ! -e /fake/state/native_db ] && ! grep -q tok123 /tmp/environment-teste'
+fi
+
+# ---------------------------------------------------------- trocar o tipo da loja
+
+# Loja Docker instalada, com volumes e o .env da API (o rake de mentira e tests/fake/troca_rake.sh).
+store_to_change() {
+  store_to_uninstall || return 1
+  rm -rf "$HOME/.ncommerce-troca-tipo" "$HOME"/ncommerce-backup-troca-tipo-* /fake/state/loja /fake/state/mysql
+  mkdir -p /fake/state/loja
+  echo restaurant > /fake/state/loja/tipo
+  printf 'NCOMMERCE_SERVER_TOKEN=tok123\nNCOMMERCE_COMMERCE_TYPE=restaurant\n' > /env/.env.production
+  : > /fake/calls.log
+}
+
+run_changer() {
+  RC=0
+  printf '%s' "${STDIN_TEXT:-}" | TT_RETRY_WAIT_S=0 bash "$SRC/manutencao/trocar_tipo_linux.sh" "$@" > "$OUT" 2>&1 || RC=$?
+}
+
+change_backup() { find "$HOME" -maxdepth 1 -name 'ncommerce-backup-troca-tipo-*' | head -n 1; }
+change_backups() { find "$HOME" -maxdepth 1 -name 'ncommerce-backup-troca-tipo-*' | wc -l; }
+loja_tipo() { cat /fake/state/loja/tipo; }
+nothing_changed() {
+  [ "$(loja_tipo)" = "restaurant" ] && ! grep -qE "rake store:commerce_type:(prepare|reset)|mysqldump|compose stop" /fake/calls.log
+}
+line_of() { grep -n -- "$1" /fake/calls.log | head -n 1 | cut -d: -f1; }
+
+if want trocar_tipo; then
+  t "trocar_tipo: --simular mostra o aviso, a conferencia e o plano, sem mudar nada"
+  store_to_change
+  run_changer --simular --tipo comercio
+  check "termina" [ "$RC" = "0" ] && out_has "SIMULACAO: nada foi mudado"
+  check "aviso claro do que some e do que fica" bash -c 'grep -q "APAGA TODO O BANCO DE DADOS" /tmp/out.txt && grep -q "MESMA SENHA" /tmp/out.txt && grep -q "NUMERACAO" /tmp/out.txt'
+  check "mostra o resumo da loja" out_has "Sai: 12 produtos"
+  check "confere o mestre sem mudar (dry run)" called "notify_master TO=general DRY_RUN=1"
+  check "mostra o plano" out_has "APAGAR e recriar o banco"
+  check "nada mudou, sem copia nem estado" bash -c '[ -z "$(find "$HOME" -maxdepth 1 -name "ncommerce-backup-troca-tipo-*")" ] && [ ! -e "$HOME/.ncommerce-troca-tipo" ]' && nothing_changed
+
+  t "trocar_tipo: caixa ou comanda aberta -> recusa e diz quais"
+  store_to_change
+  printf 'Caixa #3 aberto por Maria desde 23/11/2026 08:00\nComanda Mesa 4 (#88) aberta desde 23/11/2026 12:10\n' > /fake/state/loja/bloqueios
+  STDIN_TEXT=$'APAGAR TUDO\n' run_changer --tipo industria
+  check "recusa com 3" [ "$RC" = "3" ]
+  check "diz quais" out_has "Caixa #3 aberto por Maria" && out_has "Comanda Mesa 4"
+  check "nada mudou" nothing_changed
+  check "sem copia e sem estado" bash -c '[ -z "$(find "$HOME" -maxdepth 1 -name "ncommerce-backup-troca-tipo-*")" ] && [ ! -e "$HOME/.ncommerce-troca-tipo/troca.estado" ]'
+
+  t "trocar_tipo: mesmo tipo e recusado"
+  store_to_change
+  STDIN_TEXT=$'APAGAR TUDO\n' run_changer --tipo restaurante
+  check "recusa com 4" [ "$RC" = "4" ] && out_has "ja e do tipo Restaurante" && nothing_changed
+
+  t "trocar_tipo: resposta diferente de APAGAR TUDO cancela"
+  store_to_change
+  STDIN_TEXT=$'apagar tudo\n' run_changer --tipo comercio
+  check "cancela" [ "$RC" = "1" ] && out_has "Cancelado. Nada foi apagado."
+  check "nada mudou" nothing_changed
+
+  t "trocar_tipo: API antiga (sem a tarefa) pede para atualizar"
+  store_to_change
+  knob rake_antiga
+  STDIN_TEXT=$'APAGAR TUDO\n' run_changer --tipo comercio
+  check "para e explica" [ "$RC" != "0" ] && out_has "Atualize o NCommerce"
+  check "nada mudou" nothing_changed
+  unknob rake_antiga
+
+  t "trocar_tipo: mestre fora do ar antes de comecar -> nada muda"
+  store_to_change
+  knob master_dry_fail
+  STDIN_TEXT=$'APAGAR TUDO\n' run_changer --tipo comercio
+  check "para" [ "$RC" != "0" ] && out_has "Nada foi apagado"
+  check "nada mudou" nothing_changed
+  unknob master_dry_fail
+
+  t "trocar_tipo: troca completa pelo menu (2 = comercio)"
+  store_to_change
+  STDIN_TEXT=$'2\nAPAGAR TUDO\n' run_changer
+  b="$(change_backup)"
+  check "termina" [ "$RC" = "0" ] && out_has "TIPO DA LOJA TROCADO: agora e Comercio em geral"
+  check "mensagem final: copia, senha, o que configurar" bash -c "grep -q 'Copia de seguranca (banco conferido e configuracao): $b' /tmp/out.txt && grep -q 'MESMA senha' /tmp/out.txt && grep -q 'Configure de novo' /tmp/out.txt"
+  check "loja trocada e mestre avisado" [ "$(loja_tipo)" = "general" ] && [ "$(cat /fake/state/loja/mestre)" = "general" ]
+  check ".env da API com o tipo novo" grep -qx NCOMMERCE_COMMERCE_TYPE=general /env/.env.production
+  check "dump completo" gz_dump_ok "$b/banco-ncommerce_api_production.sql.gz"
+  check "conferencia: restaurado e contado" bash -c "cmp -s '$b/conferencia-banco-da-loja.txt' '$b/conferencia-copia-restaurada.txt' && grep -q bills '$b/conferencia-copia-restaurada.txt'"
+  check "banco temporario apagado" [ ! -e /fake/state/mysql/ncommerce_troca_conferencia.counts ]
+  check "o que fica, a lista das notas e o LEIA-ME na copia" bash -c "[ -s '$b/manter.json' ] && [ -f '$b/notas-fiscais.csv' ] && [ -f '$b/LEIA-ME.txt' ] && [ ! -e '$b/INCOMPLETO' ] && [ -f '$b/reset.txt' ]"
+  check "configuracao e volumes na copia" bash -c "[ -f '$b/instalacao/docker-compose.yml' ] && [ -f '$b/volumes/nfce_data.tar.gz' ] && [ -f '$b/volumes/api_env.tar.gz' ] && [ ! -e '$b/volumes/mysql_data.tar.gz' ]"
+  check "copia so do usuario" [ "$(stat -c %a "$b")" = "700" ]
+  check "o rake recebe a copia montada em /troca" called "-v $b:/troca"
+  check "ordem: parar, copiar, guardar, resetar, avisar, ligar" bash -c '
+    s=$(grep -n "compose stop guard web api" /fake/calls.log | head -1 | cut -d: -f1)
+    d=$(grep -n "^mysqldump" /fake/calls.log | head -1 | cut -d: -f1)
+    p=$(grep -n "rake store:commerce_type:prepare" /fake/calls.log | head -1 | cut -d: -f1)
+    r=$(grep -n "rake store:commerce_type:reset" /fake/calls.log | head -1 | cut -d: -f1)
+    m=$(grep -n "rake store:commerce_type:notify_master KEEP_FILE" /fake/calls.log | head -1 | cut -d: -f1)
+    u=$(grep -n "compose up -d$" /fake/calls.log | tail -1 | cut -d: -f1)
+    [ "$s" -lt "$d" ] && [ "$d" -lt "$p" ] && [ "$p" -lt "$r" ] && [ "$r" -lt "$m" ] && [ "$m" -lt "$u" ]'
+  check "pausa da guarda tirada, estado apagado, trava livre" bash -c "[ ! -e /opt/ncommerce/control/pausa ] && [ ! -e '$HOME/.ncommerce-troca-tipo' ]" && lock_free
+  check "log da troca" bash -c 'ls "$HOME"/ncommerce-logs/troca-tipo-*.log >/dev/null 2>&1'
+
+  t "trocar_tipo: copia que nao bate na conferencia -> nada apagado; de novo, termina"
+  store_to_change
+  knob restore_mismatch
+  STDIN_TEXT=$'APAGAR TUDO\n' run_changer --tipo industria
+  check "para" [ "$RC" != "0" ] && out_has "nao passou na conferencia" && out_has "Nada foi apagado"
+  check "nao guardou nem resetou" bash -c '! grep -qE "rake store:commerce_type:(prepare|reset)" /fake/calls.log'
+  check "loja religada" bash -c '[ "$(grep -n "compose up -d$" /fake/calls.log | tail -1 | cut -d: -f1)" -gt "$(grep -n "compose stop guard web api" /fake/calls.log | head -1 | cut -d: -f1)" ]' && [ "$(loja_tipo)" = "restaurant" ]
+  unknob restore_mismatch
+  STDIN_TEXT=$'APAGAR TUDO\n' run_changer --tipo industria
+  check "termina" [ "$RC" = "0" ] && [ "$(loja_tipo)" = "industry" ]
+  check "a copia cortada saiu: uma copia so, completa" bash -c "[ \"\$(find '$HOME' -maxdepth 1 -name 'ncommerce-backup-troca-tipo-*' | wc -l)\" = 1 ] && [ ! -e \"\$(find '$HOME' -maxdepth 1 -name 'ncommerce-backup-troca-tipo-*')/INCOMPLETO\" ]"
+
+  t "trocar_tipo: interrompida depois da copia (antes de apagar) -> pede de novo e nao refaz a copia"
+  store_to_change
+  knob prepare_fail
+  STDIN_TEXT=$'APAGAR TUDO\n' run_changer --tipo comercio
+  check "para sem apagar e religa" [ "$RC" != "0" ] && out_has "Nada foi apagado" && [ "$(loja_tipo)" = "restaurant" ]
+  unknob prepare_fail
+  STDIN_TEXT=$'nao\n' run_changer
+  check "ainda da para desistir" [ "$RC" = "1" ] && out_has "Cancelado. Nada foi apagado; a copia ficou em" && [ "$(loja_tipo)" = "restaurant" ]
+  check "desistiu: estado limpo" [ ! -e "$HOME/.ncommerce-troca-tipo/troca.estado" ]
+  knob prepare_fail
+  STDIN_TEXT=$'APAGAR TUDO\n' run_changer --tipo comercio
+  unknob prepare_fail
+  : > /fake/calls.log
+  STDIN_TEXT=$'APAGAR TUDO\n' run_changer
+  check "continua e termina" [ "$RC" = "0" ] && out_has "Continuando a troca para Comercio em geral" && [ "$(loja_tipo)" = "general" ]
+  check "sem copia nova" bash -c '! grep -q "^mysqldump" /fake/calls.log' && out_has "nao sera refeita"
+
+  t "trocar_tipo: reset interrompido no meio -> loja fica parada; de novo, termina sem refazer a copia"
+  store_to_change
+  knob reset_fail 1
+  STDIN_TEXT=$'APAGAR TUDO\n' run_changer --tipo industria
+  check "falha" [ "$RC" != "0" ] && out_has "ja comecou a ser apagado"
+  check "banco no meio, loja parada (pausa)" bash -c '[ "$(cat /fake/state/loja/banco)" = meio ] && [ -e /opt/ncommerce/control/pausa ]'
+  check "nao religou a loja com o banco pela metade" bash -c 'r=$(grep -n "rake store:commerce_type:reset" /fake/calls.log | tail -1 | cut -d: -f1); ! sed -n "$r,\$p" /fake/calls.log | grep -q "compose up -d$"'
+  run_changer --tipo restaurante
+  check "outro tipo com troca em andamento e recusado" [ "$RC" = "2" ] && out_has "ja esta em andamento"
+  STDIN_TEXT="" run_changer
+  check "continua sem pedir de novo e termina" [ "$RC" = "0" ] && out_has "parou no meio do reset" && [ "$(loja_tipo)" = "industry" ] && [ "$(cat /fake/state/loja/banco)" = ok ]
+  check "uma copia so, dois resets" [ "$(grep -c '^mysqldump' /fake/calls.log)" = "1" ] && [ "$(wc -l < /fake/state/loja/resets)" = "2" ] && [ "$(change_backups)" = "1" ]
+  check "religada" [ ! -e /opt/ncommerce/control/pausa ]
+
+  t "trocar_tipo: mestre fora do ar depois do reset -> troca vale; rodar de novo avisa"
+  store_to_change
+  knob master_fail 3
+  STDIN_TEXT=$'APAGAR TUDO\n' run_changer --tipo comercio
+  check "termina com aviso" [ "$RC" = "0" ] && out_has "FALTA avisar o NCommerce (mestre)" && [ "$(loja_tipo)" = "general" ]
+  check "loja ligada, estado guardado" bash -c "[ ! -e /opt/ncommerce/control/pausa ] && [ -f '$HOME/.ncommerce-troca-tipo/troca.estado' ] && [ ! -e /fake/state/loja/mestre ]"
+  STDIN_TEXT="" run_changer
+  check "de novo: avisa e limpa" [ "$RC" = "0" ] && [ "$(cat /fake/state/loja/mestre)" = "general" ] && [ ! -e "$HOME/.ncommerce-troca-tipo" ]
+  check "sem reset nem copia nova" [ "$(wc -l < /fake/state/loja/resets)" = "1" ] && [ "$(grep -c '^mysqldump' /fake/calls.log)" = "1" ]
+
+  t "trocar_tipo: nao roda com o instalador ou uma atualizacao aberta; copia dentro da instalacao recusada"
+  store_to_change
+  ( exec 9>>"$HOME/.ncommerce-docker/instalador.lock"; flock 9; sleep 3 ) &
+  holder=$!
+  sleep 0.5
+  STDIN_TEXT=$'APAGAR TUDO\n' run_changer --tipo comercio
+  check "recusa" [ "$RC" = "2" ] && out_has "esta rodando agora" && nothing_changed
+  kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
+  run_changer --tipo comercio --backup-em /opt/ncommerce/x
+  check "copia dentro da instalacao" [ "$RC" != "0" ] && out_has "nao pode ficar dentro de /opt/ncommerce"
+fi
+
+# Instalacao nativa com o Rakefile da API (o bundle de mentira chama o rake de mentira).
+native_store_to_change() {
+  native_store
+  rm -rf "$HOME/.ncommerce-troca-tipo" "$HOME"/ncommerce-backup-troca-tipo-* /fake/state/loja /fake/state/mysql
+  mkdir -p /fake/state/loja
+  echo restaurant > /fake/state/loja/tipo
+  touch "$HOME/NCommerce/ncommerce_api/Rakefile"
+  echo NCOMMERCE_COMMERCE_TYPE=restaurant >> "$HOME/NCommerce/ncommerce_api/.env.production"
+  echo NCOMMERCE_COMMERCE_TYPE=restaurant >> /tmp/environment-teste
+  : > /fake/calls.log
+}
+
+run_native_changer() {
+  RC=0
+  printf '%s' "${STDIN_TEXT:-}" | TT_RETRY_WAIT_S=0 NCOMMERCE_ENVIRONMENT_FILE=/tmp/environment-teste \
+    bash "$SRC/manutencao/trocar_tipo_nativo.sh" "$@" > "$OUT" 2>&1 || RC=$?
+}
+
+if want trocar_tipo_nativo; then
+  t "trocar_tipo_nativo: --simular nao muda nada"
+  native_store_to_change
+  run_native_changer --simular --tipo industria
+  check "termina" [ "$RC" = "0" ] && out_has "SIMULACAO: nada foi mudado" && out_has "Sai: 12 produtos"
+  check "nada mudou" bash -c '! grep -qE "rake store:commerce_type:(prepare|reset)|mysqldump|systemctl stop" /fake/calls.log' && [ "$(loja_tipo)" = restaurant ]
+
+  t "trocar_tipo_nativo: troca completa"
+  native_store_to_change
+  STDIN_TEXT=$'APAGAR TUDO\n' run_native_changer --tipo industria
+  b="$(change_backup)"
+  check "termina" [ "$RC" = "0" ] && out_has "TIPO DA LOJA TROCADO: agora e Industria" && [ "$(loja_tipo)" = industry ]
+  check "rake na pasta da API, com o manter.json na copia" bash -c "grep -q 'bundle exec rake store:commerce_type:reset KEEP_FILE=$b/manter.json' /fake/calls.log && grep -q 'em $HOME/NCommerce/ncommerce_api' /fake/calls.log"
+  check "dump e conferencia" bash -c "gzip -dc '$b/banco-ncommerce_api_production.sql.gz' | grep -q 'Dump completed' && cmp -s '$b/conferencia-banco-da-loja.txt' '$b/conferencia-copia-restaurada.txt'"
+  check "configuracao na copia" bash -c "grep -q tok123 '$b/config/env.production' && grep -q OUTRA '$b/config/environment'"
+  check ".env.production e /etc/environment com o tipo novo" bash -c "grep -qx NCOMMERCE_COMMERCE_TYPE=industry '$HOME/NCommerce/ncommerce_api/.env.production' && grep -qx NCOMMERCE_COMMERCE_TYPE=industry /tmp/environment-teste && grep -qx OUTRA=1 /tmp/environment-teste"
+  check "nginx parado antes da copia e ligado no fim" bash -c '[ "$(grep -n "systemctl stop nginx" /fake/calls.log | head -1 | cut -d: -f1)" -lt "$(grep -n "^mysqldump" /fake/calls.log | head -1 | cut -d: -f1)" ] && [ "$(grep -n "systemctl start nginx" /fake/calls.log | tail -1 | cut -d: -f1)" -gt "$(grep -n "rake store:commerce_type:reset" /fake/calls.log | head -1 | cut -d: -f1)" ]'
+  check "estado apagado" [ ! -e "$HOME/.ncommerce-troca-tipo" ]
+
+  t "trocar_tipo_nativo: reset interrompido continua"
+  native_store_to_change
+  knob reset_fail 1
+  STDIN_TEXT=$'APAGAR TUDO\n' run_native_changer --tipo comercio
+  check "falha no meio" [ "$RC" != "0" ] && out_has "ja comecou a ser apagado"
+  STDIN_TEXT="" run_native_changer
+  check "termina sem copia nova" [ "$RC" = "0" ] && [ "$(loja_tipo)" = general ] && [ "$(grep -c '^mysqldump' /fake/calls.log)" = "1" ]
 fi
 
 summary

@@ -1,0 +1,6 @@
+#!/bin/sh
+# bundle de mentira (instalacao nativa): `bundle exec rake ...` vai para o rake de mentira.
+echo "bundle $* (em $PWD)" >> /fake/calls.log
+[ "$1" = exec ] && shift
+[ "$1" = rake ] && shift
+exec /repo/tests/fake/troca_rake.sh "$@"

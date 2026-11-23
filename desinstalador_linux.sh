@@ -53,7 +53,7 @@ if [ "$(id -u)" -eq 0 ]; then
   echo "Rode sem sudo. Exemplo: ./desinstalador_linux.sh"
   exit 1
 fi
-for needed in lib/instalador.sh lib/desinstalador.sh; do
+for needed in lib/instalador.sh lib/desinstalador.sh lib/loja_docker.sh; do
   if [ ! -f "$ROOT/$needed" ]; then
     echo "Nao achei $ROOT/$needed. Extraia o zip do instalador inteiro e rode de dentro da pasta extraida."
     exit 1
@@ -63,6 +63,8 @@ done
 . "$ROOT/lib/instalador.sh"
 # shellcheck source=lib/desinstalador.sh
 . "$ROOT/lib/desinstalador.sh"
+# shellcheck source=lib/loja_docker.sh
+. "$ROOT/lib/loja_docker.sh"
 
 if path_inside "$BACKUP_BASE" "$INSTALL_DIR"; then
   echo "A copia nao pode ficar dentro de $INSTALL_DIR (essa pasta sera apagada). Escolha outra com --backup-em."
@@ -80,9 +82,6 @@ fail() {
   NC_FAIL_MSG="$1"
   exit 1
 }
-
-compose() { (cd "$INSTALL_DIR" && sudo docker compose "$@"); }
-has_compose() { [ -f "$INSTALL_DIR/docker-compose.yml" ]; }
 
 on_exit() {
   local rc=$?
@@ -112,25 +111,11 @@ on_exit() {
 
 # ---------------------------------------------------------------- consultas
 
-docker_volumes() {
-  [ "$DOCKER_OK" = "1" ] || return 0
-  sudo docker volume ls -q --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null || true
-}
-
-docker_containers() {
-  [ "$DOCKER_OK" = "1" ] || return 0
-  sudo docker ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null || true
-}
-
 # Imagens api e web do NCommerce, de qualquer registry e etiqueta (latest, keep-*, versoes).
 ncommerce_images() {
   [ "$DOCKER_OK" = "1" ] || return 0
   sudo docker image ls --format '{{.Repository}}:{{.Tag}}' 2>/dev/null \
     | grep -E '/ncommerce/(api|web):' | grep -v ':<none>$' | sort -u || true
-}
-
-mysql_running() {
-  [ -n "$(compose ps -q mysql 2>/dev/null)" ]
 }
 
 # Registries em que este computador entrou com o token da empresa.
@@ -145,52 +130,6 @@ registries() {
 }
 
 # ---------------------------------------------------------------- copia
-
-wait_mysql() {
-  local i
-  for i in $(seq 1 60); do
-    if compose exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e "SELECT 1"' >/dev/null 2>&1 < /dev/null; then
-      return 0
-    fi
-    sleep 2
-  done
-  return 1
-}
-
-dump_to() {
-  local dest="$1"
-  compose exec -T mysql sh -c 'rm -f /tmp/ncommerce-dump.sql /tmp/ncommerce-dump.sql.gz
-      mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction --quick --routines --no-tablespaces \
-        --result-file=/tmp/ncommerce-dump.sql ncommerce_api_production 2>/dev/null \
-      && tail -c 300 /tmp/ncommerce-dump.sql | grep -q "Dump completed" \
-      && gzip -f /tmp/ncommerce-dump.sql' < /dev/null || return 1
-  compose cp "mysql:/tmp/ncommerce-dump.sql.gz" "$dest" >/dev/null || return 1
-  compose exec -T mysql rm -f /tmp/ncommerce-dump.sql.gz < /dev/null || true
-  sudo chown "$(id -u):$(id -g)" "$dest" 2>/dev/null || true
-  dump_ok "$dest"
-}
-
-# Uma imagem que ja esta no computador e tem sh e tar.
-helper_image() {
-  local image
-  for image in docker:27.5.1-cli redis:7-alpine mysql:8.0; do
-    if sudo docker image inspect "$image" >/dev/null 2>&1; then
-      printf '%s\n' "$image"
-      return 0
-    fi
-  done
-  return 1
-}
-
-archive_volume() {
-  local volume="$1" dest_dir="$2" image name
-  name="${volume#"${PROJECT}"_}"
-  image="$(helper_image)" || return 1
-  sudo docker run --rm --network none -v "$volume:/v:ro" -v "$dest_dir:/b" --entrypoint sh "$image" \
-    -c "tar czf /b/$name.tar.gz -C /v ." < /dev/null >/dev/null || return 1
-  sudo chown "$(id -u):$(id -g)" "$dest_dir/$name.tar.gz" 2>/dev/null || true
-  gzip -t "$dest_dir/$name.tar.gz"
-}
 
 backup_store() {
   local saved volumes volume name plugins
@@ -382,13 +321,43 @@ remove_files() {
     act "apagar a pasta $INSTALL_DIR" sudo rm -rf "$INSTALL_DIR"
   fi
   remove_desktop_shortcut "Atualizar NCommerce.desktop"
+  remove_plugins_dir
   if [ -e "$INSTALLER_STATE_DIR" ]; then
     act "apagar o progresso do instalador ($INSTALLER_STATE_DIR)" rm -rf "$INSTALLER_STATE_DIR"
   fi
 }
 
+# Documentos/ncommerce/plugins, a pasta que o instalador cria (ja esta na copia).
+# Igual ao desinstalador do Windows: sai a pasta, o LEIA-ME.txt ao lado e a
+# pasta de cima se ficar vazia. Uma pasta que o suporte pos em outro lugar fica.
+remove_plugins_dir() {
+  local plugins parent
+  plugins="$(state_get plugins_dir)"
+  if [ -z "$plugins" ] && [ -f "$INSTALL_DIR/.env" ]; then
+    plugins="$(env_read "$INSTALL_DIR/.env" NCOMMERCE_PLUGINS_DIR)"
+  fi
+  [ -n "$plugins" ] || return 0
+  case "${plugins%/}" in
+    */ncommerce/plugins) ;;
+    *)
+      [ ! -d "$plugins" ] || manual "a pasta de plugins $plugins (fora do lugar padrao, pode ter outras coisas; ja esta na copia)"
+      return 0
+      ;;
+  esac
+  plugins="${plugins%/}"
+  parent="$(dirname "$plugins")"
+  if [ -e "$plugins" ]; then
+    act "apagar a pasta de plugins $plugins (ja esta na copia)" rm -rf "$plugins"
+  fi
+  if [ -e "$parent/LEIA-ME.txt" ]; then
+    act "apagar $parent/LEIA-ME.txt" rm -f "$parent/LEIA-ME.txt"
+  fi
+  if [ "$UN_SIMULAR" != "1" ] && [ -d "$parent" ] && [ -z "$(ls -A "$parent" 2>/dev/null)" ]; then
+    rmdir "$parent" 2>/dev/null || true
+  fi
+}
+
 list_leftovers() {
-  local plugins
   manual "Docker (o instalador pode ter instalado; outros programas podem usar): sudo apt remove docker.io docker-compose-v2"
   manual "o usuario $USER no grupo docker: sudo gpasswd -d $USER docker"
   if command -v anydesk >/dev/null 2>&1; then
@@ -397,10 +366,6 @@ list_leftovers() {
   manual "servidor SSH (openssh-server): o suporte entra por ele; sudo apt remove openssh-server"
   if command -v arp-scan >/dev/null 2>&1; then
     manual "arp-scan (verificador de conflito de IP): sudo apt remove arp-scan"
-  fi
-  plugins="$(state_get plugins_dir)"
-  if [ -n "$plugins" ] && [ -d "$(dirname "$plugins")" ]; then
-    manual "a pasta de plugins $(dirname "$plugins") (seus arquivos; ja estao na copia)"
   fi
   if [ -d "$LOG_DIR" ]; then
     manual "os logs da instalacao e desta desinstalacao: $LOG_DIR"
