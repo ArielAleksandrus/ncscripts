@@ -10,6 +10,7 @@
 # com o mestre e o resto que esta fora do banco. Antes, uma copia do banco
 # conferida (restaurada num banco temporario e comparada) numa pasta FORA da
 # instalacao; se ela falhar, nada e apagado. Recusa com caixa ou comanda aberta.
+# Nota sem resposta da SEFAZ ou o mestre fora do ar: avisa e pede SEGUIR.
 #   --tipo T           restaurante, comercio ou industria (sem isto, pergunta)
 #   --simular          so mostra o que faria. Nao muda nada e nao pede confirmacao.
 #   --backup-em PASTA  onde criar a pasta da copia (padrao: a pasta pessoal, ~).
@@ -36,7 +37,7 @@ while [ "$#" -gt 0 ]; do
       shift
       ;;
     --backup-em=*) TT_BACKUP_BASE="${1#--backup-em=}" ;;
-    -h|--help|--ajuda) sed -n '2,20p' "$0"; exit 0 ;;
+    -h|--help|--ajuda) sed -n '2,19p' "$0"; exit 0 ;;
     *) echo "Opcao desconhecida: $1"; exit 1 ;;
   esac
   shift
@@ -122,6 +123,32 @@ tt_copiar_resto() {
   if [ -f "$ENVIRONMENT_FILE" ]; then
     sudo cat "$ENVIRONMENT_FILE" > "$dir/config/environment" || return 1
   fi
+  tt_copiar_envios "$dir/nfce-sem-resposta"
+}
+
+# A pasta da NFC-e (NFCE_JAR do .env.production ou do /etc/environment).
+tt_pasta_nfce() {
+  local file value
+  for file in "$ENV_FILE" "$ENVIRONMENT_FILE"; do
+    [ -f "$file" ] || continue
+    value="$(sed -n 's/^[[:space:]]*\(export[[:space:]]\+\)\?NFCE_JAR=//p' "$file" 2>/dev/null | tail -n 1 | tr -d '"'"'"'\r')"
+    [ -z "$value" ] || { printf '%s\n' "$value"; return 0; }
+  done
+  printf '%s\n' "$NC_HOME/nfce"
+}
+
+# As notas sem resposta da SEFAZ (notas_input/*.envio) vao tambem na copia; na pasta da NFC-e
+# elas ficam (a troca nao mexe nela). No Docker a pasta inteira ja vai no volume nfce_data.
+tt_copiar_envios() {
+  local dest="$1" nfce f n=0
+  nfce="$(tt_pasta_nfce)"
+  [ -d "$nfce/notas_input" ] || return 0
+  for f in "$nfce"/notas_input/*.envio "$nfce"/notas_input/*.envio.orfao-*; do
+    [ -e "$f" ] || continue
+    mkdir -p "$dest" && cp -p "$f" "$dest/" || return 1
+    n=$((n + 1))
+  done
+  [ "$n" = 0 ] || echo "  - $n arquivo(s) .envio da NFC-e (nota sem resposta da SEFAZ), de $nfce/notas_input"
 }
 
 # Sem nginx a API (Passenger) e o front param; o Sidekiq nativo sai junto.

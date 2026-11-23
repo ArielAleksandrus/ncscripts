@@ -25,6 +25,10 @@
 #   ligar    liga a loja
 
 TT_CONFIRM_WORD="APAGAR TUDO"
+# Para seguir com nota fiscal sem resposta da SEFAZ ou com o mestre fora do ar (decisao X2, 23/11).
+TT_SEGUIR_WORD="SEGUIR"
+TT_PENDING_NOTES=""
+TT_MESTRE_FORA=0
 TT_DB="ncommerce_api_production"
 TT_DB_CONF="ncommerce_troca_conferencia"
 TT_KEEP_NAME="manter.json"
@@ -144,7 +148,8 @@ FICA:
 Antes de apagar e feita uma COPIA DE SEGURANCA do banco, fora da instalacao,
 conferida (restaurada num banco temporario e comparada tabela por tabela).
 Se a copia falhar, nada e apagado. Precisa: nenhum caixa aberto e nenhuma
-comanda aberta (feche antes).
+comanda aberta (feche antes). Nota fiscal sem resposta da SEFAZ ou o mestre
+fora do ar nao impedem: o script avisa e pede para digitar SEGUIR.
 EOF
 }
 
@@ -194,10 +199,11 @@ tt_conferir_loja() {
   tt_rake_show store:commerce_type:check "TO=$TT_TIPO" || rc=$?
   case "$rc" in
     0) ;;
+    7) tt_seguir_com_notas ;;
     3)
       NC_VERDICT="ok"
       echo
-      echo "Feche os caixas e as comandas acima (e espere as notas serem transmitidas) e rode de novo."
+      echo "Feche os caixas e as comandas acima e rode de novo."
       echo "Nada foi mudado."
       tt_ligar_se_parada
       tt_encerrar_estado_sem_reset
@@ -215,12 +221,61 @@ tt_conferir_loja() {
   esac
 }
 
+# Pede SEGUIR. No --simular so diz que pediria. Devolve 1 se a pessoa nao digitou SEGUIR.
+tt_pedir_seguir() {
+  local answer=""
+  if [ "$UN_SIMULAR" = "1" ]; then
+    echo "  [simular] aqui seria pedido para digitar $TT_SEGUIR_WORD para continuar."
+    return 0
+  fi
+  echo "Para continuar mesmo assim, digite $TT_SEGUIR_WORD (em maiusculas) e tecle Enter."
+  echo "Qualquer outra resposta cancela sem mudar nada."
+  read -r -p "> " answer || answer=""
+  [ "$answer" = "$TT_SEGUIR_WORD" ]
+}
+
+# Cancelado num SEGUIR: nada apagado, a loja volta (se foi parada) e o estado some.
+tt_cancelar_seguir() {
+  NC_VERDICT="ok"
+  if [ -n "$TT_BACKUP_DIR" ] && state_is_done backup; then
+    echo "Cancelado. Nada foi apagado; a copia ficou em $TT_BACKUP_DIR."
+  else
+    echo "Cancelado. Nada foi apagado."
+  fi
+  tt_ligar_se_parada
+  tt_encerrar_estado_sem_reset
+  exit 1
+}
+
+# Nota fiscal sem resposta da SEFAZ (a lista e a explicacao vieram do rake, acima): nao impede, pede SEGUIR.
+tt_seguir_com_notas() {
+  echo
+  echo "AVISO: ha nota fiscal sem resposta da SEFAZ (acima). Ela NAO impede a troca:"
+  echo "  - os arquivos dela (o .envio e os XMLs) NAO sao apagados: ficam na pasta da NFC-e"
+  echo "    e vao na copia de seguranca;"
+  echo "  - a lista vai no notas-fiscais.csv, na copia (coluna sem_resposta_sefaz);"
+  echo "  - a numeracao continua depois dela (nenhum numero e repetido)."
+  tt_pedir_seguir || tt_cancelar_seguir
+  TT_PENDING_NOTES="$TT_SEGUIR_WORD"
+}
+
 tt_conferir_mestre() {
+  local rc=0
   echo
   echo "Conferindo a conexao com o NCommerce (mestre)..."
-  if ! tt_rake_show store:commerce_type:notify_master "TO=$TT_TIPO" DRY_RUN=1; then
-    tt_fail "o NCommerce (mestre) nao respondeu ou recusou. A troca precisa avisar o mestre: confira a internet e rode de novo. Nada foi apagado."
-  fi
+  tt_rake_show store:commerce_type:notify_master "TO=$TT_TIPO" DRY_RUN=1 || rc=$?
+  case "$rc" in
+    0) ;;
+    8)
+      echo
+      echo "AVISO: o NCommerce (mestre) nao respondeu (internet ou o mestre fora do ar)."
+      echo "A troca pode ser feita so na loja. O mestre e avisado no fim, se voltar;"
+      echo "senao, rode $TT_SCRIPT de novo com internet e ele avisa o mestre (nada e refeito)."
+      tt_pedir_seguir || tt_cancelar_seguir
+      TT_MESTRE_FORA=1
+      ;;
+    *) tt_fail "o NCommerce (mestre) recusou a troca (acima). Fale com o suporte NCommerce. Nada foi apagado." ;;
+  esac
 }
 
 # Cancelado/recusado antes do reset: o estado some (a copia, se feita, fica).
@@ -251,7 +306,11 @@ tt_plano() {
   echo "  3. guardar o que fica (dados da empresa, administradores, NFC-e) em $TT_KEEP_NAME, na copia"
   echo "  4. APAGAR e recriar o banco $TT_DB como uma loja nova do tipo $(tt_label "$TT_TIPO")"
   echo "     e repor o que fica"
-  echo "  5. avisar o NCommerce (mestre) da troca"
+  if [ "$TT_MESTRE_FORA" = "1" ]; then
+    echo "  5. avisar o NCommerce (mestre) da troca (fora do ar agora: se nao voltar, rode de novo depois)"
+  else
+    echo "  5. avisar o NCommerce (mestre) da troca"
+  fi
   echo "  6. ligar a loja"
 }
 
@@ -326,6 +385,8 @@ banco-$TT_DB.sql.gz   banco de dados da loja (mysqldump), conferido: restaurado 
 conferencia-*.txt                        a contagem de linhas de cada tabela (loja e copia)
 $TT_KEEP_NAME                              o que a troca repoe (empresa, administradores, NFC-e)
 notas-fiscais.csv                        a lista das notas fiscais que estavam no banco
+                                         (sem_resposta_sefaz = sim: nota sem resposta da SEFAZ)
+nfce-sem-resposta/                       (so na instalacao nativa, se houver) os .envio da NFC-e
 o resto                                  a configuracao da loja (.env e o que mais houver)
 
 Tem senhas: guarde em lugar seguro, fora de pastas sincronizadas (OneDrive, Google Drive).
@@ -348,7 +409,15 @@ tt_prepare() {
     echo "O que fica ja foi guardado: $TT_BACKUP_DIR/$TT_KEEP_NAME"
     return 0
   fi
-  tt_rake_show store:commerce_type:prepare "TO=$TT_TIPO" "KEEP_FILE=$(tt_keep_in)" "CHANGED_BY=$TT_CHANGED_BY" || rc=$?
+  tt_rake_show store:commerce_type:prepare "TO=$TT_TIPO" "KEEP_FILE=$(tt_keep_in)" "CHANGED_BY=$TT_CHANGED_BY" \
+    "PENDING_NOTES=$TT_PENDING_NOTES" || rc=$?
+  if [ "$rc" = "7" ] && [ "$TT_PENDING_NOTES" != "$TT_SEGUIR_WORD" ]; then
+    # continuando uma troca (ou nota nova depois da conferencia): pede o SEGUIR aqui
+    tt_seguir_com_notas
+    rc=0
+    tt_rake_show store:commerce_type:prepare "TO=$TT_TIPO" "KEEP_FILE=$(tt_keep_in)" "CHANGED_BY=$TT_CHANGED_BY" \
+      "PENDING_NOTES=$TT_PENDING_NOTES" || rc=$?
+  fi
   case "$rc" in
     0) ;;
     3|4)
@@ -427,6 +496,10 @@ tt_mensagem_final() {
   echo "Os administradores entram com o MESMO login e a MESMA senha de antes."
   echo "A NFC-e continua com a mesma configuracao e a numeracao continua de onde parou."
   echo "As notas (XML) continuam no computador; a lista delas esta em notas-fiscais.csv na copia."
+  if [ "$TT_PENDING_NOTES" = "$TT_SEGUIR_WORD" ]; then
+    echo "Nota(s) sem resposta da SEFAZ: os arquivos continuam na pasta da NFC-e. Para saber se foram"
+    echo "autorizadas, o suporte roda na pasta da NFC-e: java -jar NFCe.jar --pendentes (so consulta)."
+  fi
   echo
   echo "Configure de novo, como numa instalacao nova:"
   echo "  - produtos, categorias e cardapios;"

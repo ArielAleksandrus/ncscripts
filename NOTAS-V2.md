@@ -223,7 +223,7 @@ registra o evento em `POST /companies/commerce_type_change` (NOTAS-V2 do ncommer
   funcoes Docker do desinstalador (compose, wait_mysql, dump_to, archive_volume...) foram para `lib/loja_docker.sh` e
   servem aos dois.
 - Fluxo: aviso (o que some, o que fica) -> tipo (menu 1/2/3 ou `--tipo`/`-Tipo`) -> `check` (recusa com caixa ou
-  comanda aberta, nota nao transmitida ou mesmo tipo; diz quais) -> mestre em dry run (sem mestre, nao comeca) -> plano
+  comanda aberta ou mesmo tipo; diz quais) -> mestre em dry run -> plano
   -> digitar APAGAR TUDO -> desliga a loja (Docker: `control/pausa` + `compose stop guard web api`; nativo: nginx e
   Sidekiq) -> copia em `~/ncommerce-backup-troca-tipo-<data>` / `C:\NCommerce-backup-troca-tipo-<data>`: dump
   conferido (gzip + "Dump completed") e RESTAURADO no banco temporario `ncommerce_troca_conferencia`, contagem de
@@ -232,6 +232,17 @@ registra o evento em `POST /companies/commerce_type_change` (NOTAS-V2 do ncommer
   `compose run` da API) -> `reset` -> `notify_master` (3 tentativas; se falhar, a troca vale e rodar de novo avisa) ->
   liga a loja -> mensagem final (copia, tipo novo, admins com a mesma senha, o que configurar de novo, sem usuarios
   de exemplo: so os admins e o usuario interno do iFood, decisao X1 de 23/11).
+- Avisos com SEGUIR (decisao X2 do Ariel, 23/11): nota fiscal sem resposta da SEFAZ (`check`/`prepare` saem com 7) e
+  mestre fora do ar no dry run (`notify_master` sai com 8: sem conexao, timeout ou 5xx) NAO impedem mais. O script
+  mostra o aviso e pede para digitar SEGUIR (`-Seguir SEGUIR` no Windows, para o suporte por SSH); outra resposta
+  cancela sem mudar nada. Com SEGUIR nas notas, o `prepare` recebe `PENDING_NOTES=SEGUIR`; se ele ainda sair com 7
+  (continuando uma troca, ou nota nova depois da conferencia), o SEGUIR e pedido ali. Mestre que RECUSA (6: 4xx ou
+  sem token) continua parando. Com o mestre fora do ar, a troca acontece so na loja: o `notify_master` do fim tenta 3
+  vezes e, se falhar, o estado fica e rodar de novo avisa (o mestre e idempotente pelo `change_id`). Aviso automatico
+  na proxima sincronizacao: nao feito (o banco da loja e novo e nao ha onde guardar a pendencia sem migration; a
+  rerun ja cobre). `--simular`/`-Simular` mostra os avisos e diz que pediria SEGUIR. Nativo: os `notas_input/*.envio`
+  (pasta do `NFCE_JAR` do .env.production ou /etc/environment) vao tambem em `nfce-sem-resposta/` na copia; no Docker
+  a pasta inteira ja vai no volume `nfce_data`. Fake: `/fake/state/loja/notas`, knob `master_dry_down`.
 - O rake roda num container de uma vez (`compose run --rm --no-deps -T --entrypoint bash api`), com o
   `/env/.env.production` carregado e `NFCE_DATA=/data/nfce` (os links de /opt/nfce so existem no entrypoint).
 - Retomada (estado em `~/.ncommerce-troca-tipo` / `C:\ProgramData\NCommerce-troca-tipo`): copia conferida nao e

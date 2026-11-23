@@ -123,11 +123,51 @@ Describe "antes de apagar" {
         Test-NothingChanged
     }
 
-    It "mestre fora do ar antes: nada muda" {
+    It "mestre recusa antes: nada muda" {
         Set-Knob "master_dry_fail"
         Invoke-Change @("-Tipo", "comercio", "-Confirmacao", "APAGAR TUDO")
         $Rc | Should -Be 1
         $Out | Should -Match "Nada foi apagado"
+        Test-NothingChanged
+    }
+
+    It "mestre fora do ar antes: avisa e, sem SEGUIR, nada muda" {
+        Set-Knob "master_dry_down"
+        Invoke-Change @("-Tipo", "comercio", "-Confirmacao", "APAGAR TUDO") "nao"
+        $Rc | Should -Be 1
+        $Out | Should -Match "nao respondeu"
+        $Out | Should -Match "Cancelado. Nada foi apagado."
+        Test-NothingChanged
+        Test-Path $StateFile | Should -BeFalse
+    }
+
+    It "nota sem resposta da SEFAZ: avisa e, sem SEGUIR, nada muda" {
+        Write-File "/fake/state/loja/notas" "Nota fiscal 12 (serie 100): o envio ficou sem resposta`n"
+        Invoke-Change @("-Tipo", "comercio", "-Confirmacao", "APAGAR TUDO") "nao"
+        $Rc | Should -Be 1
+        $Out | Should -Match "Nota fiscal 12 \(serie 100\)"
+        $Out | Should -Match "NAO sao apagados"
+        $Out | Should -Match "notas-fiscais.csv"
+        Test-NothingChanged
+    }
+
+    It "nota sem resposta e caixa aberto: o caixa continua recusando" {
+        Write-File "/fake/state/loja/notas" "Nota fiscal 12 (serie 100): o envio ficou sem resposta`n"
+        Write-File "/fake/state/loja/bloqueios" "Caixa #3 aberto por Maria`n"
+        Invoke-Change @("-Tipo", "comercio", "-Confirmacao", "APAGAR TUDO", "-Seguir", "SEGUIR")
+        $Rc | Should -Be 3
+        Test-NothingChanged
+    }
+
+    It "-Simular mostra os avisos de nota sem resposta e de mestre fora do ar" {
+        Write-File "/fake/state/loja/notas" "Nota fiscal 12 (serie 100): o envio ficou sem resposta`n"
+        Set-Knob "master_dry_down"
+        Invoke-Change @("-Simular", "-Tipo", "comercio")
+        $Rc | Should -Be 0
+        $Out | Should -Match "Nota fiscal 12 \(serie 100\)"
+        $Out | Should -Match "AVISO: o NCommerce \(mestre\) nao respondeu"
+        ([regex]::Matches($Out, "seria pedido para digitar SEGUIR")).Count | Should -Be 2
+        $Out | Should -Match "SIMULACAO: nada foi alterado"
         Test-NothingChanged
     }
 
@@ -224,6 +264,30 @@ Describe "troca" {
         Get-Tipo | Should -Be "restaurant"
         Test-Path $StateFile | Should -BeFalse
         Test-Path "$Loja/control/pausa" | Should -BeFalse
+    }
+
+    It "nota sem resposta com SEGUIR: troca e o prepare recebe o SEGUIR" {
+        Write-File "/fake/state/loja/notas" "Nota fiscal 12 (serie 100): o envio ficou sem resposta`n"
+        Invoke-Change @("-Tipo", "comercio", "-Confirmacao", "APAGAR TUDO") "SEGUIR"
+        $Rc | Should -Be 0
+        Get-Tipo | Should -Be "general"
+        (Get-Calls) | Should -Match "PENDING_NOTES=SEGUIR"
+        $Out | Should -Match "java -jar NFCe.jar --pendentes"
+    }
+
+    It "mestre fora do ar antes e depois com SEGUIR: troca so na loja e abrir de novo avisa" {
+        Set-Knob "master_dry_down"
+        Set-Knob "master_fail" "3"
+        Invoke-Change @("-Tipo", "comercio", "-Confirmacao", "APAGAR TUDO", "-Seguir", "SEGUIR")
+        $Rc | Should -Be 0
+        $Out | Should -Match "FALTA avisar o NCommerce"
+        Get-Tipo | Should -Be "general"
+        Test-Path "/fake/state/loja/mestre" | Should -BeFalse
+        Remove-Knob "master_dry_down"
+        Invoke-Change @()
+        $Rc | Should -Be 0
+        (Get-Content -Raw /fake/state/loja/mestre).Trim() | Should -Be "general"
+        Test-Path $StateFile | Should -BeFalse
     }
 
     It "mestre fora do ar depois do reset: a troca vale e abrir de novo avisa" {

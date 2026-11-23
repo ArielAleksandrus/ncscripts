@@ -9,6 +9,7 @@
 # com o mestre e o resto que esta fora do banco. Antes, uma copia do banco
 # conferida (restaurada num banco temporario e comparada) numa pasta FORA da
 # instalacao; se ela falhar, nada e apagado. Recusa com caixa ou comanda aberta.
+# Nota sem resposta da SEFAZ ou o mestre fora do ar: avisa e pede SEGUIR.
 #   --tipo T           restaurante, comercio ou industria (sem isto, pergunta)
 #   --simular          so mostra o que faria. Nao muda nada e nao pede confirmacao.
 #   --backup-em PASTA  onde criar a pasta da copia (padrao: a pasta pessoal, ~).
@@ -35,7 +36,7 @@ while [ "$#" -gt 0 ]; do
       shift
       ;;
     --backup-em=*) TT_BACKUP_BASE="${1#--backup-em=}" ;;
-    -h|--help|--ajuda) sed -n '2,19p' "$0"; exit 0 ;;
+    -h|--help|--ajuda) sed -n '2,18p' "$0"; exit 0 ;;
     *) echo "Opcao desconhecida: $1"; exit 1 ;;
   esac
   shift

@@ -177,8 +177,12 @@ o mestre, o tunel, o iFood conectado e as impressoras instaladas.
 O script:
   1. avisa o que some e o que fica, pergunta o tipo novo e pede para digitar
      APAGAR TUDO;
-  2. recusa se houver caixa aberto, comanda aberta ou nota fiscal ainda nao
-     transmitida (diz quais) e se o mestre nao responder;
+  2. recusa se houver caixa aberto ou comanda aberta (diz quais). Nota fiscal
+     sem resposta da SEFAZ ou o mestre fora do ar NAO impedem: o script mostra
+     o aviso (quais notas; os arquivos delas ficam na pasta da NFC-e e na copia;
+     a lista vai no notas-fiscais.csv) e pede para digitar SEGUIR. Com o mestre
+     fora do ar a troca acontece so na loja: rodar o script de novo com internet
+     avisa o mestre;
   3. desliga a loja e faz uma COPIA do banco fora da instalacao, conferida:
      restaurada num banco temporario e comparada tabela por tabela. Se falhar,
      nada e apagado e a loja volta a ligar;

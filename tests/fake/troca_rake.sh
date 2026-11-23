@@ -2,15 +2,17 @@
 # rake de mentira da API da loja: as tarefas store:commerce_type:* da troca de
 # tipo (manutencao/trocar_tipo_*), com o mesmo contrato de saida e codigos.
 # Loja em /fake/state/loja: tipo, bloqueios (uma linha por caixa/comanda aberta),
-# banco (ok | meio), mestre (tipo avisado). Knobs: rake_antiga, prepare_fail,
-# reset_fail (quantas vezes falha no meio), master_fail, master_dry_fail.
+# banco (ok | meio), mestre (tipo avisado), notas (uma linha por nota sem resposta
+# da SEFAZ: codigo 7 sem PENDING_NOTES=SEGUIR). Knobs: rake_antiga, prepare_fail,
+# reset_fail (quantas vezes falha no meio), master_fail, master_dry_fail (o mestre
+# recusa: 6), master_dry_down (o mestre nao responde: 8).
 # TROCA_MAP="/troca=/pasta/no/host" traduz o caminho montado no container.
 L=/fake/state/loja
 K=/fake/knobs
 mkdir -p "$L"
 echo "rake $*" >> /fake/calls.log
 task="$1"; shift
-TO=""; KEEP_FILE=""; CONFIRM=""; ENV_FILE=""; DRY_RUN=""; CHANGED_BY=""
+TO=""; KEEP_FILE=""; CONFIRM=""; ENV_FILE=""; DRY_RUN=""; CHANGED_BY=""; PENDING_NOTES=""
 for a in "$@"; do
   case "$a" in
     TO=*) TO="${a#TO=}" ;;
@@ -19,6 +21,7 @@ for a in "$@"; do
     ENV_FILE=*) ENV_FILE="${a#ENV_FILE=}" ;;
     DRY_RUN=*) DRY_RUN="${a#DRY_RUN=}" ;;
     CHANGED_BY=*) CHANGED_BY="${a#CHANGED_BY=}" ;;
+    PENDING_NOTES=*) PENDING_NOTES="${a#PENDING_NOTES=}" ;;
   esac
 done
 if [ -n "${TROCA_MAP:-}" ] && [ -n "$KEEP_FILE" ]; then
@@ -43,6 +46,11 @@ check() {
     echo "Nao da para trocar o tipo agora:"
     sed 's/^/  - /' "$L/bloqueios"
     exit 3
+  fi
+  if [ -s "$L/notas" ]; then
+    echo "Nota(s) fiscal(is) sem resposta da SEFAZ:"
+    sed 's/^/  - /' "$L/notas"
+    [ "$PENDING_NOTES" = "SEGUIR" ] || { echo "Para trocar mesmo assim, confirme com SEGUIR."; exit 7; }
   fi
 }
 case "$task" in
@@ -75,10 +83,11 @@ case "$task" in
     ;;
   store:commerce_type:notify_master)
     if [ "$DRY_RUN" = "1" ]; then
-      [ ! -e "$K/master_dry_fail" ] || { echo "Sem resposta do mestre."; exit 6; }
+      [ ! -e "$K/master_dry_fail" ] || { echo "O mestre recusou a troca."; exit 6; }
+      [ ! -e "$K/master_dry_down" ] || { echo "Sem conexao com o mestre."; exit 8; }
       echo "MASTER_OK"; exit 0
     fi
-    if take master_fail; then echo "Sem resposta do mestre."; exit 6; fi
+    if take master_fail; then echo "Sem conexao com o mestre."; exit 8; fi
     [ -s "$KEEP_FILE" ] || exit 5
     sed -n 's/.*"to":"\([a-z]*\)".*/\1/p' "$KEEP_FILE" > "$L/mestre"
     echo "MASTER_OK"

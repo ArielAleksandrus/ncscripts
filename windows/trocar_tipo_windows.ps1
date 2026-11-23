@@ -9,21 +9,29 @@
   seguranca do banco FORA da instalacao (C:\NCommerce-backup-troca-tipo-<data>),
   conferida: restaurada num banco temporario e comparada tabela por tabela. Se
   ela falhar, nada e apagado. Recusa com caixa ou comanda aberta (diz quais).
+  Nota fiscal sem resposta da SEFAZ ou o mestre fora do ar nao impedem: avisa
+  e pede para digitar SEGUIR.
 
   -Tipo         restaurante, comercio ou industria (sem isto, pergunta).
   -Simular      so mostra o que seria feito. Nao muda nada.
   -PastaBackup  pasta onde criar a copia, por exemplo um pen drive (E:\). Padrao: C:\.
   -Confirmacao  uso do suporte (por SSH, sem teclado): o texto APAGAR TUDO.
+  -Seguir       uso do suporte (por SSH, sem teclado): o texto SEGUIR, que responde
+                os avisos (nota sem resposta da SEFAZ, mestre fora do ar).
 
   Pode ser interrompida (janela fechada, queda de energia) e aberta de novo:
   continua de onde parou e nao refaz a copia. Progresso e log em
   C:\ProgramData\NCommerce-troca-tipo.
 #>
-param([string]$Tipo = "", [switch]$Simular, [string]$PastaBackup = "", [string]$Confirmacao = "")
+param([string]$Tipo = "", [switch]$Simular, [string]$PastaBackup = "", [string]$Confirmacao = "", [string]$Seguir = "")
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 $ConfirmWord = "APAGAR TUDO"
+# Para seguir com nota fiscal sem resposta da SEFAZ ou com o mestre fora do ar (decisao X2, 23/11).
+$SeguirWord = "SEGUIR"
+$script:PendingNotes = ""
+$script:MasterDown = $false
 $InstallDir = "C:\NCommerce"
 if ($env:NCOMMERCE_INSTALL_DIR) { $InstallDir = $env:NCOMMERCE_INSTALL_DIR }
 $InstallDir = $InstallDir.TrimEnd('\', '/')
@@ -248,7 +256,38 @@ function Show-Warning {
     Say "Antes de apagar e feita uma COPIA DE SEGURANCA do banco, fora da instalacao,"
     Say "conferida (restaurada num banco temporario e comparada tabela por tabela)."
     Say "Se a copia falhar, nada e apagado. Precisa: nenhum caixa aberto e nenhuma"
-    Say "comanda aberta (feche antes)."
+    Say "comanda aberta (feche antes). Nota fiscal sem resposta da SEFAZ ou o mestre"
+    Say "fora do ar nao impedem: o script avisa e pede para digitar SEGUIR."
+}
+
+# Pede SEGUIR. No -Simular so diz que pediria.
+function Read-Seguir {
+    if ($Simular) {
+        Say "  [simular] aqui seria pedido para digitar $SeguirWord para continuar."
+        return $true
+    }
+    $answer = $Seguir
+    if (-not $answer) { $answer = Read-Host "Para continuar mesmo assim, digite $SeguirWord (em maiusculas) e tecle Enter (qualquer outra coisa cancela)" }
+    return ("$answer".Trim() -ceq $SeguirWord)
+}
+
+function Stop-Seguir {
+    $bk = ""
+    if ($script:NcStateFile -and (Test-NcStepDone "backup")) { $bk = Get-NcState "backup_pasta" }
+    if ($bk) { Say "Cancelado. Nada foi apagado; a copia ficou em $bk." } else { Say "Cancelado. Nada foi apagado." }
+    Stop-Changer 1 "cancelado"
+}
+
+# Nota fiscal sem resposta da SEFAZ (a lista e a explicacao vieram do rake, acima): nao impede, pede SEGUIR.
+function Confirm-PendingNotes {
+    Say ""
+    Say "AVISO: ha nota fiscal sem resposta da SEFAZ (acima). Ela NAO impede a troca:" "Yellow"
+    Say "  - os arquivos dela (o .envio e os XMLs) NAO sao apagados: ficam na pasta da NFC-e"
+    Say "    e vao na copia de seguranca;"
+    Say "  - a lista vai no notas-fiscais.csv, na copia (coluna sem_resposta_sefaz);"
+    Say "  - a numeracao continua depois dela (nenhum numero e repetido)."
+    if (-not (Read-Seguir)) { Stop-Seguir }
+    $script:PendingNotes = $SeguirWord
 }
 
 function Read-Tipo {
@@ -287,9 +326,10 @@ function Test-Store {
     $r = Invoke-Rake @("store:commerce_type:check", "TO=$($script:NewType)")
     switch ($r.Code) {
         0 { return }
+        7 { Confirm-PendingNotes; return }
         3 {
             Say ""
-            Say "Feche os caixas e as comandas acima (e espere as notas serem transmitidas) e abra de novo."
+            Say "Feche os caixas e as comandas acima e abra de novo."
             Say "Nada foi mudado."
             Stop-Changer 3 "recusado"
         }
@@ -306,9 +346,17 @@ function Test-Master {
     Say ""
     Say "Conferindo a conexao com o NCommerce (mestre)..."
     $r = Invoke-Rake @("store:commerce_type:notify_master", "TO=$($script:NewType)", "DRY_RUN=1")
-    if ($r.Code -ne 0) {
-        Fail "o NCommerce (mestre) nao respondeu ou recusou. A troca precisa avisar o mestre." "confira a internet e abra o TrocarTipoWindows.bat de novo."
+    if ($r.Code -eq 0) { return }
+    if ($r.Code -eq 8) {
+        Say ""
+        Say "AVISO: o NCommerce (mestre) nao respondeu (internet ou o mestre fora do ar)." "Yellow"
+        Say "A troca pode ser feita so na loja. O mestre e avisado no fim, se voltar;"
+        Say "senao, abra o TrocarTipoWindows.bat de novo com internet e ele avisa o mestre (nada e refeito)."
+        if (-not (Read-Seguir)) { Stop-Seguir }
+        $script:MasterDown = $true
+        return
     }
+    Fail "o NCommerce (mestre) recusou a troca (acima)." "fale com o suporte NCommerce."
 }
 
 function Show-Plan {
@@ -319,7 +367,11 @@ function Show-Plan {
     Say "     banco temporario ($DbConf), token, notas e configuracao"
     Say "  3. guardar o que fica (dados da empresa, administradores, NFC-e) em $KeepName, na copia"
     Say "  4. APAGAR e recriar o banco $Db como uma loja nova do tipo $(Get-TipoLabel $script:NewType) e repor o que fica"
-    Say "  5. avisar o NCommerce (mestre) da troca"
+    if ($script:MasterDown) {
+        Say "  5. avisar o NCommerce (mestre) da troca (fora do ar agora: se nao voltar, abra de novo depois)"
+    } else {
+        Say "  5. avisar o NCommerce (mestre) da troca"
+    }
     Say "  6. ligar a loja"
 }
 
@@ -407,7 +459,7 @@ function Save-Backup {
             "                         banco temporario, mesmas tabelas e mesmo numero de linhas",
             "conferencia-*.txt        a contagem de linhas de cada tabela (loja e copia)",
             "$KeepName              o que a troca repoe (empresa, administradores, NFC-e)",
-            "notas-fiscais.csv        a lista das notas fiscais que estavam no banco",
+            "notas-fiscais.csv        a lista das notas fiscais que estavam no banco (sem_resposta_sefaz = sim: sem resposta da SEFAZ)",
             "volumes\                 token, notas fiscais (XML) e certificado",
             "C_NCommerce\             .env e docker-compose.yml",
             "",
@@ -453,7 +505,12 @@ function Save-Keep {
         return
     }
     $who = "$env:USERNAME@$env:COMPUTERNAME (trocar_tipo_windows.ps1)"
-    $r = Invoke-Rake @("store:commerce_type:prepare", "TO=$($script:NewType)", "KEEP_FILE=/troca/$KeepName", "CHANGED_BY=$who")
+    $r = Invoke-Rake @("store:commerce_type:prepare", "TO=$($script:NewType)", "KEEP_FILE=/troca/$KeepName", "CHANGED_BY=$who", "PENDING_NOTES=$($script:PendingNotes)")
+    if ($r.Code -eq 7 -and $script:PendingNotes -ne $SeguirWord) {
+        # continuando uma troca (ou nota nova depois da conferencia): pede o SEGUIR aqui
+        Confirm-PendingNotes
+        $r = Invoke-Rake @("store:commerce_type:prepare", "TO=$($script:NewType)", "KEEP_FILE=/troca/$KeepName", "CHANGED_BY=$who", "PENDING_NOTES=$($script:PendingNotes)")
+    }
     if ($r.Code -eq 3 -or $r.Code -eq 4) {
         Say ""
         Say "A troca foi recusada (acima). Nada foi apagado; a copia ficou em $(Get-NcState 'backup_pasta')."
@@ -506,6 +563,10 @@ function Show-Final {
     Say "Os administradores entram com o MESMO login e a MESMA senha de antes."
     Say "A NFC-e continua com a mesma configuracao e a numeracao continua de onde parou."
     Say "As notas (XML) continuam no computador; a lista delas esta em notas-fiscais.csv na copia."
+    if ($script:PendingNotes -eq $SeguirWord) {
+        Say "Nota(s) sem resposta da SEFAZ: os arquivos continuam na pasta da NFC-e. Para saber se foram"
+        Say "autorizadas, o suporte roda na pasta da NFC-e: java -jar NFCe.jar --pendentes (so consulta)."
+    }
     Say ""
     Say "Configure de novo, como numa instalacao nova:"
     Say "  - produtos, categorias e cardapios;"

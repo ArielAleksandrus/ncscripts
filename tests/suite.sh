@@ -985,13 +985,72 @@ if want trocar_tipo; then
   check "nada mudou" nothing_changed
   unknob rake_antiga
 
-  t "trocar_tipo: mestre fora do ar antes de comecar -> nada muda"
+  t "trocar_tipo: mestre recusa antes de comecar -> nada muda"
   store_to_change
   knob master_dry_fail
   STDIN_TEXT=$'APAGAR TUDO\n' run_changer --tipo comercio
-  check "para" [ "$RC" != "0" ] && out_has "Nada foi apagado"
+  check "para" [ "$RC" != "0" ] && out_has "recusou a troca" && out_has "Nada foi apagado"
   check "nada mudou" nothing_changed
   unknob master_dry_fail
+
+  t "trocar_tipo: mestre fora do ar antes de comecar -> aviso; sem SEGUIR nada muda"
+  store_to_change
+  knob master_dry_down
+  STDIN_TEXT=$'nao\n' run_changer --tipo comercio
+  check "avisa e cancela" [ "$RC" = "1" ] && out_has "nao respondeu" && out_has "digite SEGUIR" && out_has "Cancelado. Nada foi apagado."
+  check "nada mudou" nothing_changed && [ ! -e "$HOME/.ncommerce-troca-tipo/troca.estado" ]
+  unknob master_dry_down
+
+  t "trocar_tipo: mestre fora do ar antes e depois -> com SEGUIR troca so na loja; rodar de novo avisa"
+  store_to_change
+  knob master_dry_down
+  knob master_fail 3
+  STDIN_TEXT=$'SEGUIR\nAPAGAR TUDO\n' run_changer --tipo comercio
+  check "troca na loja" [ "$RC" = "0" ] && [ "$(loja_tipo)" = "general" ] && out_has "FALTA avisar o NCommerce (mestre)"
+  check "tentou avisar no fim" [ "$(count_calls 'rake store:commerce_type:notify_master KEEP_FILE')" = "3" ] && [ ! -e /fake/state/loja/mestre ]
+  check "estado guardado para avisar depois" [ -f "$HOME/.ncommerce-troca-tipo/troca.estado" ]
+  unknob master_dry_down
+  STDIN_TEXT="" run_changer
+  check "de novo: avisa e limpa" [ "$RC" = "0" ] && [ "$(cat /fake/state/loja/mestre)" = "general" ] && [ ! -e "$HOME/.ncommerce-troca-tipo" ]
+
+  t "trocar_tipo: nota sem resposta da SEFAZ -> aviso; sem SEGUIR nada muda"
+  store_to_change
+  printf 'Nota fiscal 12 (serie 100): o envio ficou sem resposta\n' > /fake/state/loja/notas
+  STDIN_TEXT=$'APAGAR TUDO\n' run_changer --tipo comercio
+  check "avisa e cancela" [ "$RC" = "1" ] && out_has "Nota fiscal 12 (serie 100)" && out_has "NAO sao apagados" && out_has "notas-fiscais.csv" && out_has "Cancelado. Nada foi apagado."
+  check "nada mudou" nothing_changed
+
+  t "trocar_tipo: nota sem resposta da SEFAZ -> com SEGUIR troca, e o prepare recebe o SEGUIR"
+  store_to_change
+  printf 'Nota fiscal 12 (serie 100): o envio ficou sem resposta\n' > /fake/state/loja/notas
+  STDIN_TEXT=$'SEGUIR\nAPAGAR TUDO\n' run_changer --tipo comercio
+  check "troca" [ "$RC" = "0" ] && [ "$(loja_tipo)" = "general" ] && out_has "java -jar NFCe.jar --pendentes"
+  check "prepare com PENDING_NOTES=SEGUIR" called "PENDING_NOTES=SEGUIR"
+
+  t "trocar_tipo: nota sem resposta e caixa aberto -> o caixa continua recusando"
+  store_to_change
+  printf 'Nota fiscal 12 (serie 100): o envio ficou sem resposta\n' > /fake/state/loja/notas
+  printf 'Caixa #3 aberto por Maria desde 23/11/2026 08:00\n' > /fake/state/loja/bloqueios
+  STDIN_TEXT=$'SEGUIR\nAPAGAR TUDO\n' run_changer --tipo comercio
+  check "recusa com 3" [ "$RC" = "3" ] && out_has "Caixa #3 aberto por Maria" && nothing_changed
+
+  t "trocar_tipo: --simular mostra os avisos de nota sem resposta e de mestre fora do ar"
+  store_to_change
+  printf 'Nota fiscal 12 (serie 100): o envio ficou sem resposta\n' > /fake/state/loja/notas
+  knob master_dry_down
+  run_changer --simular --tipo comercio
+  check "termina e avisa" [ "$RC" = "0" ] && out_has "Nota fiscal 12 (serie 100)" && out_has "AVISO: o NCommerce (mestre) nao respondeu" && [ "$(grep -c "seria pedido para digitar SEGUIR" "$OUT")" = "2" ] && out_has "SIMULACAO: nada foi mudado"
+  check "nada mudou" nothing_changed && [ ! -e "$HOME/.ncommerce-troca-tipo" ]
+  unknob master_dry_down
+
+  t "trocar_tipo: nota sem resposta depois da conferencia (continuando) -> pede SEGUIR no prepare"
+  store_to_change
+  knob prepare_fail
+  STDIN_TEXT=$'APAGAR TUDO\n' run_changer --tipo comercio
+  unknob prepare_fail
+  printf 'Nota fiscal 13 (serie 100): em processamento\n' > /fake/state/loja/notas
+  STDIN_TEXT=$'APAGAR TUDO\nSEGUIR\n' run_changer
+  check "pede e troca" [ "$RC" = "0" ] && out_has "Nota fiscal 13 (serie 100)" && [ "$(loja_tipo)" = "general" ] && called "PENDING_NOTES=SEGUIR"
 
   t "trocar_tipo: troca completa pelo menu (2 = comercio)"
   store_to_change
@@ -1111,8 +1170,12 @@ if want trocar_tipo_nativo; then
 
   t "trocar_tipo_nativo: troca completa"
   native_store_to_change
-  STDIN_TEXT=$'APAGAR TUDO\n' run_native_changer --tipo industria
+  mkdir -p "$HOME/NCommerce/nfce/notas_input"
+  echo "<lote/>" > "$HOME/NCommerce/nfce/notas_input/dados_nota_100_12.envio"
+  printf 'Nota fiscal 12 (serie 100): o envio ficou sem resposta\n' > /fake/state/loja/notas
+  STDIN_TEXT=$'SEGUIR\nAPAGAR TUDO\n' run_native_changer --tipo industria
   b="$(change_backup)"
+  check "o .envio fica na pasta da NFC-e e vai na copia" bash -c "[ -f '$HOME/NCommerce/nfce/notas_input/dados_nota_100_12.envio' ] && grep -q lote '$b/nfce-sem-resposta/dados_nota_100_12.envio'"
   check "termina" [ "$RC" = "0" ] && out_has "TIPO DA LOJA TROCADO: agora e Industria" && [ "$(loja_tipo)" = industry ]
   check "rake na pasta da API, com o manter.json na copia" bash -c "grep -q 'bundle exec rake store:commerce_type:reset KEEP_FILE=$b/manter.json' /fake/calls.log && grep -q 'em $HOME/NCommerce/ncommerce_api' /fake/calls.log"
   check "dump e conferencia" bash -c "gzip -dc '$b/banco-ncommerce_api_production.sql.gz' | grep -q 'Dump completed' && cmp -s '$b/conferencia-banco-da-loja.txt' '$b/conferencia-copia-restaurada.txt'"
