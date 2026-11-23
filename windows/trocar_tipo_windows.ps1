@@ -513,8 +513,7 @@ function Show-Final {
     Say "  - impressoras: qual imprime o que (Configuracoes > Impressoras);"
     Say "  - taxas, formas de pagamento, entrega e as opcoes da loja (Configuracoes);"
     Say "  - clientes e fornecedores (se quiser, o suporte importa da copia)."
-    Say "A instalacao nova cria usuarios de exemplo com senha padrao (ex.: cashier / cashier123):"
-    Say "  troque a senha deles ou apague em Configuracoes > Usuarios."
+    Say "Nao ha usuarios de exemplo: ficam so os administradores (e o usuario interno do iFood)."
     if ($script:MasterPending) {
         Say ""
         Say "FALTA avisar o NCommerce (mestre): abra o TrocarTipoWindows.bat de novo com internet." "Yellow"

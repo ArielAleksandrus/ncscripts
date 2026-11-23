@@ -998,7 +998,7 @@ if want trocar_tipo; then
   STDIN_TEXT=$'2\nAPAGAR TUDO\n' run_changer
   b="$(change_backup)"
   check "termina" [ "$RC" = "0" ] && out_has "TIPO DA LOJA TROCADO: agora e Comercio em geral"
-  check "mensagem final: copia, senha, o que configurar" bash -c "grep -q 'Copia de seguranca (banco conferido e configuracao): $b' /tmp/out.txt && grep -q 'MESMA senha' /tmp/out.txt && grep -q 'Configure de novo' /tmp/out.txt"
+  check "mensagem final: copia, senha, o que configurar" bash -c "grep -q 'Copia de seguranca (banco conferido e configuracao): $b' /tmp/out.txt && grep -q 'MESMA senha' /tmp/out.txt && grep -q 'Configure de novo' /tmp/out.txt && grep -q 'Nao ha usuarios de exemplo' /tmp/out.txt && ! grep -q 'cashier123' /tmp/out.txt"
   check "loja trocada e mestre avisado" [ "$(loja_tipo)" = "general" ] && [ "$(cat /fake/state/loja/mestre)" = "general" ]
   check ".env da API com o tipo novo" grep -qx NCOMMERCE_COMMERCE_TYPE=general /env/.env.production
   check "dump completo" gz_dump_ok "$b/banco-ncommerce_api_production.sql.gz"

@@ -230,8 +230,8 @@ registra o evento em `POST /companies/commerce_type_change` (NOTAS-V2 do ncommer
   linhas de todas as tabelas igual nos dois (arquivos `conferencia-*.txt`), mais configuracao e volumes; qualquer falha
   para, religa a loja e nada e apagado -> `prepare` (manter.json + notas-fiscais.csv na copia, montada em /troca no
   `compose run` da API) -> `reset` -> `notify_master` (3 tentativas; se falhar, a troca vale e rodar de novo avisa) ->
-  liga a loja -> mensagem final (copia, tipo novo, admins com a mesma senha, o que configurar de novo, usuarios de
-  exemplo com senha padrao).
+  liga a loja -> mensagem final (copia, tipo novo, admins com a mesma senha, o que configurar de novo, sem usuarios
+  de exemplo: so os admins e o usuario interno do iFood, decisao X1 de 23/11).
 - O rake roda num container de uma vez (`compose run --rm --no-deps -T --entrypoint bash api`), com o
   `/env/.env.production` carregado e `NFCE_DATA=/data/nfce` (os links de /opt/nfce so existem no entrypoint).
 - Retomada (estado em `~/.ncommerce-troca-tipo` / `C:\ProgramData\NCommerce-troca-tipo`): copia conferida nao e

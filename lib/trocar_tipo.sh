@@ -434,8 +434,7 @@ tt_mensagem_final() {
   echo "  - impressoras: qual imprime o que (Configuracoes > Impressoras);"
   echo "  - taxas, formas de pagamento, entrega e as opcoes da loja (Configuracoes);"
   echo "  - clientes e fornecedores (se quiser, o suporte importa da copia)."
-  echo "A instalacao nova cria usuarios de exemplo com senha padrao (ex.: cashier / cashier123):"
-  echo "  troque a senha deles ou apague em Configuracoes > Usuarios."
+  echo "Nao ha usuarios de exemplo: ficam so os administradores (e o usuario interno do iFood)."
   if [ "${TT_MESTRE_PENDENTE:-0}" = "1" ]; then
     echo
     echo "FALTA avisar o NCommerce (mestre): rode $TT_SCRIPT de novo com internet."

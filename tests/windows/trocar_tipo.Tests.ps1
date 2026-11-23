@@ -161,6 +161,8 @@ Describe "troca" {
         $Rc | Should -Be 0
         $Out | Should -Match "TIPO DA LOJA TROCADO: agora e Comercio em geral"
         $Out | Should -Match "MESMA senha"
+        $Out | Should -Match "Nao ha usuarios de exemplo"
+        $Out | Should -Not -Match "cashier123"
         Get-Tipo | Should -Be "general"
         (Get-Content -Raw /fake/state/loja/mestre).Trim() | Should -Be "general"
         $dirs = Get-BackupDirs
