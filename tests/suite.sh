@@ -1052,22 +1052,47 @@ if want trocar_tipo; then
   check "termina" [ "$RC" = "0" ] && [ "$(loja_tipo)" = "industry" ]
   check "a copia cortada saiu: uma copia so, completa" bash -c "[ \"\$(find '$HOME' -maxdepth 1 -name 'ncommerce-backup-troca-tipo-*' | wc -l)\" = 1 ] && [ ! -e \"\$(find '$HOME' -maxdepth 1 -name 'ncommerce-backup-troca-tipo-*')/INCOMPLETO\" ]"
 
-  t "trocar_tipo: interrompida depois da copia (antes de apagar) -> pede de novo e nao refaz a copia"
+  t "trocar_tipo: falha depois da copia religa a loja -> a copia velha nao serve mais; de novo, copia nova"
   store_to_change
   knob prepare_fail
   STDIN_TEXT=$'APAGAR TUDO\n' run_changer --tipo comercio
-  check "para sem apagar e religa" [ "$RC" != "0" ] && out_has "Nada foi apagado" && [ "$(loja_tipo)" = "restaurant" ]
+  check "para sem apagar e religa" [ "$RC" != "0" ] && out_has "Nada foi apagado" && [ "$(loja_tipo)" = "restaurant" ] \
+    && [ ! -e /opt/ncommerce/control/pausa ]
   unknob prepare_fail
+  : > /fake/calls.log
+  STDIN_TEXT=$'APAGAR TUDO\n' run_changer --tipo comercio
+  check "termina com uma copia nova (a loja vendeu depois da primeira)" [ "$RC" = "0" ] && [ "$(loja_tipo)" = "general" ] \
+    && [ "$(grep -c '^mysqldump' /fake/calls.log)" = "1" ] && [ "$(change_backups)" = "2" ]
+
+  t "trocar_tipo: loja que ficou parada depois da copia -> pede de novo e nao refaz a copia"
+  store_to_change
+  knob prepare_fail; knob up_fail 1
+  STDIN_TEXT=$'APAGAR TUDO\n' run_changer --tipo comercio
+  check "para sem apagar; nao religou e diz como religar" [ "$RC" != "0" ] && out_has "Nada foi apagado" \
+    && out_has "ela religa a loja sem apagar nada" && [ -e /opt/ncommerce/control/pausa ]
+  unknob prepare_fail; unknob up_fail
   STDIN_TEXT=$'nao\n' run_changer
   check "ainda da para desistir" [ "$RC" = "1" ] && out_has "Cancelado. Nada foi apagado; a copia ficou em" && [ "$(loja_tipo)" = "restaurant" ]
-  check "desistiu: estado limpo" [ ! -e "$HOME/.ncommerce-troca-tipo/troca.estado" ]
-  knob prepare_fail
+  check "desistiu: religada e estado limpo" [ ! -e /opt/ncommerce/control/pausa ] && [ ! -e "$HOME/.ncommerce-troca-tipo/troca.estado" ]
+  knob prepare_fail; knob up_fail 1
   STDIN_TEXT=$'APAGAR TUDO\n' run_changer --tipo comercio
-  unknob prepare_fail
+  unknob prepare_fail; unknob up_fail
   : > /fake/calls.log
   STDIN_TEXT=$'APAGAR TUDO\n' run_changer
   check "continua e termina" [ "$RC" = "0" ] && out_has "Continuando a troca para Comercio em geral" && [ "$(loja_tipo)" = "general" ]
   check "sem copia nova" bash -c '! grep -q "^mysqldump" /fake/calls.log' && out_has "nao sera refeita"
+  check "parou a loja de novo antes de guardar e apagar" bash -c '[ "$(grep -n "compose stop guard web api" /fake/calls.log | head -1 | cut -d: -f1)" -lt "$(grep -n "rake store:commerce_type:prepare" /fake/calls.log | head -1 | cut -d: -f1)" ]'
+
+  t "trocar_tipo: banco mudou depois da copia (loja ligada por fora) -> copia nova antes de apagar"
+  store_to_change
+  knob prepare_fail; knob up_fail 1
+  STDIN_TEXT=$'APAGAR TUDO\n' run_changer --tipo comercio
+  unknob prepare_fail; unknob up_fail
+  printf 'bills\t31\nproducts\t12\nusers\t5\n' > /fake/state/mysql/ncommerce_api_production.counts
+  : > /fake/calls.log
+  STDIN_TEXT=$'APAGAR TUDO\n' run_changer
+  check "percebe e copia de novo" [ "$RC" = "0" ] && out_has "O banco mudou depois da copia" \
+    && [ "$(grep -c '^mysqldump' /fake/calls.log)" = "1" ] && [ "$(change_backups)" = "2" ] && [ "$(loja_tipo)" = "general" ]
 
   t "trocar_tipo: reset interrompido no meio -> loja fica parada; de novo, termina sem refazer a copia"
   store_to_change
