@@ -164,6 +164,11 @@ function Complete-Interrupted([bool]$Interrupted) {
                 "O NCommerce esta sendo religado. Espere 2 minutos e confira se o sistema abre.",
                 "Depois use o atalho Atualizar NCommerce de novo. Se o sistema nao abrir, chame o suporte.") "Yellow"
         }
+        "conferindo" {
+            # A versao nova ja esta no lugar; so a espera pelo veredito parou.
+            Show-Verdict "ATUALIZACAO FEITA. A CONFERENCIA DA VERSAO NOVA CONTINUA SOZINHA." @(
+                "Se ela falhar, o NCommerce volta sozinho para a anterior. Veja em alguns minutos se o sistema abre.") "Yellow"
+        }
         default {
             Show-Verdict "A ATUALIZACAO NAO FOI FEITA. A LOJA CONTINUA COMO ESTAVA." @(
                 "O que fazer: use o atalho Atualizar NCommerce de novo. Se repetir, mande o log para o suporte.") "Yellow"

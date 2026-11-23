@@ -155,6 +155,11 @@ on_exit() {
           "O NCommerce esta sendo religado. Espere 2 minutos e confira se o sistema abre." \
           "Depois use o atalho Atualizar NCommerce de novo. Se o sistema nao abrir, chame o suporte."
         ;;
+      conferindo)
+        # A versao nova ja esta no lugar; so a espera pelo veredito parou.
+        verdict "ATUALIZACAO FEITA. A CONFERENCIA DA VERSAO NOVA CONTINUA SOZINHA." \
+          "Se ela falhar, o NCommerce volta sozinho para a anterior. Veja em alguns minutos se o sistema abre."
+        ;;
       *)
         if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
           verdict "A ATUALIZACAO NAO FOI FEITA (codigo $rc). A LOJA CONTINUA COMO ESTAVA." \

@@ -567,6 +567,15 @@ if want atualizar; then
   check "veredito" out_has "INTERROMPIDA NO MEIO DA TROCA"
   check "estado limpo depois de religar" [ ! -e /opt/ncommerce/control/update.state ]
 
+  t "atualizar: Ctrl+C na conferencia diz que a versao nova ja esta no lugar"
+  installed_store
+  knob published_api sha256:api2
+  NCOMMERCE_UPDATE_WAIT_S=60 start_update_bg
+  for _ in $(seq 1 150); do grep -q "Conferindo a versao nova" "$OUT" 2>/dev/null && break; sleep 0.1; done
+  signal_group INT; wait_bg
+  check "veredito certo" out_has "ATUALIZACAO FEITA. A CONFERENCIA DA VERSAO NOVA CONTINUA SOZINHA" \
+    && out_lacks "NAO FOI FEITA" && [ "$(running_api)" = "sha256:api2" ]
+
   t "atualizar: queda de energia no meio da troca deixa o aviso para a guarda"
   installed_store
   knob published_api sha256:api2; knob up_sleep 30
