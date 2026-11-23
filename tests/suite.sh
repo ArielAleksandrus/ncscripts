@@ -844,6 +844,11 @@ if want desinstalar; then
   mkdir -p /tmp/backups-teste
   STDIN_TEXT=$'DESINSTALAR\n' run_uninstaller --backup-em /tmp/backups-teste
   check "copia na pasta pedida" bash -c 'ls /tmp/backups-teste/ncommerce-backup-desinstalacao-*/banco-ncommerce_api_production.sql.gz >/dev/null 2>&1'
+  store_to_uninstall
+  plug="$(sed -n 's/^NCOMMERCE_PLUGINS_DIR=//p' /opt/ncommerce/.env | tail -n 1)"
+  STDIN_TEXT=$'DESINSTALAR\n' run_uninstaller --backup-em "$plug/copia"
+  check "dentro da pasta de plugins (que e apagada) e recusado" [ -n "$plug" ] && [ "$RC" != "0" ] \
+    && out_has "nao pode ficar dentro de $plug" && nothing_removed
 
   t "desinstalar: nao roda com o instalador ou uma atualizacao aberta"
   store_to_uninstall
