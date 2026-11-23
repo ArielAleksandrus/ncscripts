@@ -641,6 +641,10 @@ function Save-UninstallBackup {
     } catch {
         Stop-Backup $partial "nao consegui renomear $partial para $final ($($_.Exception.Message))."
     }
+    if ($dumpName) { Set-NcState "backup_banco" "1" }
+    # Copia pronta: daqui em diante a loja e removida, nao religada. Religar numa
+    # falha das etapas seguintes faria vendas que nao estao na copia.
+    $script:StoppedStore = $false
     Say "COPIA DE SEGURANCA PRONTA: $final" "Green"
 }
 
@@ -686,7 +690,14 @@ function Remove-StoreVolumes {
         Fail "os dados do NCommerce so saem depois da copia de seguranca, e ela nao foi feita." "abra o DesinstaladorWindows.bat de novo."
     }
     if (-not (Assert-DockerReady)) { Say "O Docker nao esta neste computador: nada a remover."; return }
-    foreach ($v in (Get-StoreVolumes)) {
+    $volumes = @(Get-StoreVolumes)
+    # O banco so sai se a copia levou o banco (o Docker pode nao ter listado o
+    # volume na hora da copia).
+    if ($volumes -contains "${Project}_mysql_data" -and (Get-NcState "backup_banco") -ne "1" -and (Get-NcState "sem_backup") -ne "1") {
+        Fail "o banco de dados do NCommerce ainda esta no Docker, mas a copia de seguranca foi feita sem ele." `
+            "chame o suporte NCommerce. Nada do banco foi apagado."
+    }
+    foreach ($v in $volumes) {
         if ((Invoke-Native -Exe $DockerExe -Arguments @("volume", "rm", $v) -Quiet) -eq 0) { Say "Volume removido: $v" }
     }
     $left = Get-StoreVolumes

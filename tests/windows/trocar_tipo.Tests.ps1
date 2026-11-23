@@ -252,12 +252,28 @@ Describe "troca" {
         Test-Path "$Loja/control/pausa" | Should -BeFalse
     }
 
-    It "parada antes do reset: pede de novo, da para desistir, e a loja volta" {
+    It "falha antes do reset religa a loja: a copia velha nao serve, abrir de novo faz outra" {
         Set-Knob "prepare_fail"
         Invoke-Change @("-Tipo", "comercio", "-Confirmacao", "APAGAR TUDO")
         $Rc | Should -Be 1
         $Out | Should -Match "Nada foi apagado"
+        Test-Path "$Loja/control/pausa" | Should -BeFalse
         Remove-Knob "prepare_fail"
+        Invoke-Change @("-Tipo", "comercio", "-Confirmacao", "APAGAR TUDO")
+        $Rc | Should -Be 0
+        Get-Tipo | Should -Be "general"
+        ([regex]::Matches((Get-Calls), "(?m)^mysqldump")).Count | Should -Be 2
+        (Get-BackupDirs).Count | Should -Be 2
+    }
+
+    It "parada antes do reset (loja nao religou): pede de novo, da para desistir, e a loja volta" {
+        Set-Knob "prepare_fail"
+        Set-Knob "up_fail" "1"
+        Invoke-Change @("-Tipo", "comercio", "-Confirmacao", "APAGAR TUDO")
+        $Rc | Should -Be 1
+        $Out | Should -Match "Nada foi apagado"
+        Remove-Knob "prepare_fail"
+        Remove-Knob "up_fail"
         Invoke-Change @("-Confirmacao", "nao")
         $Rc | Should -Be 1
         $Out | Should -Match "Cancelado. Nada foi apagado; a copia ficou em"
@@ -288,6 +304,27 @@ Describe "troca" {
         $Rc | Should -Be 0
         (Get-Content -Raw /fake/state/loja/mestre).Trim() | Should -Be "general"
         Test-Path $StateFile | Should -BeFalse
+    }
+
+    It "loja ligada no logon depois da copia: faz copia nova antes de apagar" {
+        Set-Knob "prepare_fail"
+        Set-Knob "up_fail" "1"
+        Invoke-Change @("-Tipo", "comercio", "-Confirmacao", "APAGAR TUDO")
+        $Rc | Should -Be 1
+        Remove-Knob "prepare_fail"
+        Remove-Knob "up_fail"
+        Write-File "/fake/state/containers/api.status" "running`n"
+        Invoke-Change @("-Tipo", "comercio", "-Confirmacao", "APAGAR TUDO")
+        $Rc | Should -Be 0
+        $Out | Should -Match "Essa copia nao vale mais"
+        Get-Tipo | Should -Be "general"
+        ([regex]::Matches((Get-Calls), "(?m)^mysqldump")).Count | Should -Be 2
+        (Get-BackupDirs).Count | Should -Be 2
+        # Parou a loja de novo entre a copia nova e o prepare.
+        $lines = @((Get-Calls) -split "`n")
+        $dump = Get-Line "mysqldump" -Last
+        $prep = Get-Line "commerce_type:prepare" -Last
+        @($lines[$dump..$prep] | Where-Object { $_.Contains("compose stop guard web api") }).Count | Should -BeGreaterThan 0
     }
 
     It "mestre fora do ar depois do reset: a troca vale e abrir de novo avisa" {

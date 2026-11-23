@@ -5,7 +5,7 @@
 # banco (ok | meio), mestre (tipo avisado), notas (uma linha por nota sem resposta
 # da SEFAZ: codigo 7 sem PENDING_NOTES=SEGUIR). Knobs: rake_antiga, prepare_fail,
 # reset_fail (quantas vezes falha no meio), master_fail, master_dry_fail (o mestre
-# recusa: 6), master_dry_down (o mestre nao responde: 8).
+# recusa: 6), master_dry_down (o mestre nao responde: 8), notas_so_no_prepare.
 # TROCA_MAP="/troca=/pasta/no/host" traduz o caminho montado no container.
 L=/fake/state/loja
 K=/fake/knobs
@@ -47,7 +47,8 @@ check() {
     sed 's/^/  - /' "$L/bloqueios"
     exit 3
   fi
-  if [ -s "$L/notas" ]; then
+  # knob notas_so_no_prepare: a nota aparece depois da conferencia (so o prepare ve)
+  if [ -s "$L/notas" ] && { [ "$task" != "store:commerce_type:check" ] || [ ! -e "$K/notas_so_no_prepare" ]; }; then
     echo "Nota(s) fiscal(is) sem resposta da SEFAZ:"
     sed 's/^/  - /' "$L/notas"
     [ "$PENDING_NOTES" = "SEGUIR" ] || { echo "Para trocar mesmo assim, confirme com SEGUIR."; exit 7; }

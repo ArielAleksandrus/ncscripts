@@ -131,7 +131,14 @@ function Restore-StoreIfStopped {
     if (Get-NcState "reset_iniciado") { return }
     Say "Religando a loja como estava..."
     if ((Start-Store) -eq 0) {
-        if ($script:NcStateFile) { Remove-NcState "loja_parada" }
+        if ($script:NcStateFile) {
+            Remove-NcState "loja_parada"
+            # Ligada, a loja volta a vender: a copia feita com ela parada deixa de
+            # ser a do banco de agora. A proxima execucao faz outra (esta fica).
+            if (Test-NcStepDone "backup") {
+                foreach ($k in @("etapa_backup", "etapa_prepare", "backup_pasta")) { Remove-NcState $k }
+            }
+        }
         $script:StoppedHere = $false
     } else {
         Say "Nao consegui religar a loja. Reinicie o computador: ela liga sozinha." "Yellow"
@@ -217,8 +224,9 @@ function Get-ComposeLines([string[]]$Arguments) {
 }
 
 # Guarda primeiro (ela religa container parado); o aviso de pausa tambem a segura.
+# Sempre para (parar o que ja esta parado nao custa): numa retomada a loja pode
+# ter sido ligada no logon, e copia, prepare e reset nao rodam com ela vendendo.
 function Stop-Store {
-    if (Get-NcState "loja_parada") { return }
     Say "Desligando a loja (nenhuma venda entra depois da copia)..."
     Set-NcState "loja_parada" "1"
     $script:StoppedHere = $true
@@ -498,6 +506,7 @@ function Test-DumpComplete([string]$Path) {
 }
 
 function Save-Keep {
+    Stop-Store
     $keep = Join-Path (Get-NcState "backup_pasta") $KeepName
     # Gravado de uma vez (temporario + rename): se existe, esta completo.
     if ((Get-NcFileLength $keep) -gt 0) {
@@ -522,6 +531,7 @@ function Save-Keep {
 
 function Reset-Database {
     if (Get-NcState "reset_iniciado") { Say "Uma execucao anterior parou no meio do reset. Recomecando o reset a partir do que foi guardado." "Yellow" }
+    Stop-Store
     Set-NcState "reset_iniciado" ([string][DateTimeOffset]::UtcNow.ToUnixTimeSeconds())
     Say "Apagando e recriando o banco (pode levar alguns minutos)..."
     $r = Invoke-Rake @("store:commerce_type:reset", "KEEP_FILE=/troca/$KeepName", "CONFIRM=APAGAR_TUDO", "ENV_FILE=/env/.env.production")
@@ -632,6 +642,18 @@ try {
         Say "O Docker Desktop nao esta respondendo. Abra o Docker Desktop, espere ficar pronto e abra de novo. Nada foi mudado." "Red"
         Close-Changer
         exit 1
+    }
+
+    # A loja ligada (no logon, ou religada depois de uma falha) vendeu depois da
+    # copia: ela nao e mais a do banco de agora. Comeca de novo, com copia nova.
+    if ($resuming -and -not $Simular -and -not (Get-NcState "reset_iniciado")) {
+        $running = @(Get-ComposeLines @("ps", "--status", "running", "--services"))
+        if ($running -contains "api") {
+            Say "A loja voltou a funcionar depois da copia de $(Get-NcState 'backup_pasta'). Essa copia nao vale mais:" "Yellow"
+            Say "sera feita outra antes de apagar (a anterior fica onde esta)." "Yellow"
+            foreach ($k in @("etapa_backup", "etapa_prepare", "backup_pasta", "loja_parada")) { Remove-NcState $k }
+            $resuming = $false
+        }
     }
 
     if ($resuming) {

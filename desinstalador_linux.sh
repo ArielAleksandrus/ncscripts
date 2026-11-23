@@ -454,6 +454,16 @@ if [ "$UN_SIMULAR" != "1" ] && [ -f "$INSTALL_DIR/.env" ]; then
   plugins_dir="$(env_read "$INSTALL_DIR/.env" NCOMMERCE_PLUGINS_DIR)"
   [ -z "$plugins_dir" ] || state_set plugins_dir "$plugins_dir"
 fi
+# A pasta de plugins tambem e apagada: a copia nao pode ficar dentro dela.
+plugins_dir="$(state_get plugins_dir)"
+if [ -z "$plugins_dir" ] && [ -f "$INSTALL_DIR/.env" ]; then
+  plugins_dir="$(env_read "$INSTALL_DIR/.env" NCOMMERCE_PLUGINS_DIR)"
+fi
+if [ "$SEM_BACKUP" != "1" ] && [ -n "$plugins_dir" ] && path_inside "$BACKUP_BASE" "$plugins_dir"; then
+  echo "A copia nao pode ficar dentro de $plugins_dir (essa pasta sera apagada). Escolha outra com --backup-em."
+  NC_VERDICT="ok"
+  exit 1
+fi
 if [ -n "$(state_get backup_dir)" ] || [ -n "$(state_get inicio)" ]; then
   echo "Continuando a desinstalacao comecada em $(date -d "@$(state_get inicio)" '+%d/%m/%Y %H:%M' 2>/dev/null || echo 'outra execucao')."
 fi

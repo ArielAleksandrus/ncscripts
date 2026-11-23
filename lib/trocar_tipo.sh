@@ -110,18 +110,45 @@ tt_ligar_se_parada() {
     if tt_ligar_loja; then
       state_unset loja_parada 2>/dev/null || true
       TT_LOJA_PARADA=0
+      # Ligada, a loja volta a vender: a copia feita com ela parada deixa de
+      # ser a do banco de agora. A proxima execucao faz outra (esta fica).
+      if [ -z "$(state_get reset_iniciado)" ] && state_is_done backup; then
+        state_unset etapa_backup 2>/dev/null || true
+        state_unset etapa_prepare 2>/dev/null || true
+        state_unset backup_dir 2>/dev/null || true
+      fi
     else
-      echo "Nao consegui religar a loja. Reinicie o computador: ela liga sozinha."
+      # Container parado com "compose stop" nao volta sozinho num reinicio
+      # (restart: unless-stopped), e a guarda tambem ficou parada.
+      echo "Nao consegui religar a loja. Rode $TT_SCRIPT de novo e responda qualquer coisa"
+      echo "diferente de $TT_CONFIRM_WORD: ela religa a loja sem apagar nada."
     fi
   fi
 }
 
+# Sempre para (parar o que ja esta parado nao custa): numa retomada a loja pode
+# ter sido ligada por fora (reinicio, suporte), e copia, prepare e reset nao
+# podem rodar com a loja vendendo.
 tt_parar_loja_marcando() {
-  [ -z "$(state_get loja_parada)" ] || return 0
   echo "Desligando a loja (nenhuma venda entra depois da copia)..."
   state_set loja_parada 1
   TT_LOJA_PARADA=1
   tt_parar_loja || tt_fail "nao consegui desligar a loja para a copia."
+}
+
+# A copia de uma execucao anterior ainda e a do banco de agora: mesma contagem
+# de linhas em todas as tabelas que a conferida quando ela foi feita.
+tt_copia_ainda_vale() {
+  local dir="$1" agora
+  [ -s "$dir/conferencia-banco-da-loja.txt" ] || return 1
+  tt_banco_pronto || return 1
+  agora="$(mktemp)"
+  if tt_contar_tabelas "$TT_DB" > "$agora" && cmp -s "$agora" "$dir/conferencia-banco-da-loja.txt"; then
+    rm -f "$agora"
+    return 0
+  fi
+  rm -f "$agora"
+  return 1
 }
 
 tt_aviso() {
@@ -351,17 +378,27 @@ tt_conferir_copia() {
 tt_backup() {
   local saved dump
   saved="$(state_get backup_dir)"
+  # Depois do reset (troca so esperando o aviso ao mestre) a loja ja e a nova.
+  state_is_done reset || tt_parar_loja_marcando
   if state_is_done backup && [ -n "$saved" ] && [ -f "$saved/banco-$TT_DB.sql.gz" ] && [ ! -e "$saved/INCOMPLETO" ]; then
-    TT_BACKUP_DIR="$saved"
-    echo "A copia ja foi feita e conferida numa execucao anterior: $saved"
-    return 0
+    # Depois do reset o banco ja e outro: a copia que vale e a de antes.
+    if [ -n "$(state_get reset_iniciado)" ] || tt_copia_ainda_vale "$saved"; then
+      TT_BACKUP_DIR="$saved"
+      echo "A copia ja foi feita e conferida numa execucao anterior: $saved"
+      return 0
+    fi
+    echo "O banco mudou depois da copia de $saved (a loja voltou a funcionar)."
+    echo "Fazendo uma copia nova; a anterior fica onde esta."
+    state_unset etapa_backup
+    state_unset etapa_prepare
+    state_unset backup_dir
+    saved=""
   fi
   # Uma copia cortada por uma execucao anterior nao serve: comeca de novo.
   if [ -n "$saved" ] && [ -e "$saved/INCOMPLETO" ]; then
     rm -rf -- "$saved"
     state_unset backup_dir
   fi
-  tt_parar_loja_marcando
   TT_BACKUP_DIR="$(abs_path "$TT_BACKUP_BASE")/ncommerce-backup-troca-tipo-$(date '+%Y%m%d-%H%M%S')"
   mkdir -p "$TT_BACKUP_DIR" || tt_fail "nao consegui criar a pasta da copia em $TT_BACKUP_BASE. Nada foi apagado."
   chmod 700 "$TT_BACKUP_DIR" 2>/dev/null || true
@@ -479,7 +516,7 @@ tt_avisar_mestre() {
 tt_ligar() {
   if state_is_done ligar; then return 0; fi
   echo "Ligando a loja..."
-  tt_ligar_loja || tt_fail "nao consegui ligar a loja. Reinicie o computador (ela liga sozinha) ou rode $TT_SCRIPT de novo."
+  tt_ligar_loja || tt_fail "nao consegui ligar a loja. Rode $TT_SCRIPT de novo: ela termina de ligar."
   state_unset loja_parada
   TT_LOJA_PARADA=0
   state_done ligar

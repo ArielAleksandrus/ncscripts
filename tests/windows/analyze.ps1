@@ -21,6 +21,18 @@ foreach ($f in $files) {
         $found += 'ascii'
     }
 }
+# Os .bat: o cmd nao tem /dev/null (o redirecionamento falha e o comando nem roda).
+$bats = @(Get-ChildItem -Path (Join-Path $PSScriptRoot '../..') -Recurse -Filter *.bat | Where-Object { $_.FullName -notmatch '[\\/]tests[\\/]' })
+foreach ($b in $bats) {
+    $n = 0
+    foreach ($line in [IO.File]::ReadAllLines($b.FullName)) {
+        $n++
+        if ($line -match '/dev/null') {
+            Write-Host "$($b.Name):$n usa /dev/null (no cmd e >nul)"
+            $found += 'bat'
+        }
+    }
+}
 $found | Where-Object { $_ -isnot [string] } | ForEach-Object { "{0}:{1} {2} {3}" -f (Split-Path -Leaf $_.ScriptPath), $_.Line, $_.RuleName, $_.Message }
-"Analise: $($files.Count) arquivos, $($found.Count) problemas."
+"Analise: $($files.Count) arquivos .ps1 e $($bats.Count) .bat, $($found.Count) problemas."
 if ($found.Count -gt 0) { exit 1 }
