@@ -262,10 +262,12 @@ switch_to() {
   log "Trocando de ${from:-?} para $to ($kind, $reason)."
   prev_tag="$(env_get NCOMMERCE_TAG "$D/.env")"
   env_set NCOMMERCE_TAG "keep-$to"
-  if ! dc up -d --no-deps api web; then
+  # O servico tunnel usa a imagem da api e vai junto (compose antigo nao tem o servico).
+  tunnel_svc="$(dc config --services 2>/dev/null | grep -x tunnel)"
+  if ! dc up -d --no-deps api web $tunnel_svc; then
     # A troca nao aconteceu: o .env volta a dizer a versao que esta rodando.
     env_set NCOMMERCE_TAG "${prev_tag:-latest}"
-    dc up -d --no-deps api web >/dev/null 2>&1
+    dc up -d --no-deps api web $tunnel_svc >/dev/null 2>&1
     echo "O docker compose nao conseguiu subir a versao $to."
     return 1
   fi

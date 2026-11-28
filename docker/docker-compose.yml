@@ -61,6 +61,9 @@ services:
       # Tunel Nlabs: o front esta no container web e a porta 22 e a do host.
       TUNNEL_FRONT_HOST: web
       TUNNEL_SSH_HOST: host.docker.internal
+      # Os ssh -R do tunel rodam no servico tunnel (imagem com docker/tunnel-service.sh).
+      # Uma imagem antiga ignora a variavel e abre os tuneis aqui, como antes.
+      NCOMMERCE_TUNNEL_SERVICE: "1"
       # IP da loja. `ip a` dentro do container nao mostra a rede do servidor.
       NCOMMERCE_HOST_IPS: ${NCOMMERCE_HOST_IPS:-}
     extra_hosts:
@@ -91,6 +94,25 @@ services:
       - ${NCOMMERCE_PLUGINS_DIR:-./plugins}:/app/ncommerce_api/app/lib/plugins:ro
       # Versoes guardadas e pedidos de troca (servico guard). A tela le e pede por aqui.
       - ./control:/control
+
+  # Tunel Nlabs (acesso remoto) fora da api: deploy ou reinicio da api nao derruba mais o
+  # acesso, e um ssh que cai volta sozinho em 10s. Mesma imagem da api, outro comando.
+  # A api escreve em /env/tunnel o id da empresa e o pedido do botao "Acesso".
+  # Imagem antiga, sem o script: o servico fica parado e a api abre os tuneis.
+  tunnel:
+    image: ${NCOMMERCE_REGISTRY:-registry.ncommerce.app:5050}/ncommerce/api:${NCOMMERCE_TAG:-latest}
+    restart: unless-stopped
+    entrypoint: ["sh", "-c", "if [ -x /usr/bin/ncommerce-tunnel-service ]; then exec /usr/bin/ncommerce-tunnel-service; fi; echo 'Imagem sem o servico de tunel: a api abre os tuneis.'; exec sleep infinity"]
+    environment:
+      TZ: ${TZ:-America/Sao_Paulo}
+      TUNNEL_API_HOST: api
+      TUNNEL_FRONT_HOST: web
+      TUNNEL_SSH_HOST: host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Chave e known_hosts do tunel (/env/ssh) e os arquivos que a api escreve (/env/tunnel).
+      - api_env:/env:ro
 
   web:
     image: ${NCOMMERCE_REGISTRY:-registry.ncommerce.app:5050}/ncommerce/web:${NCOMMERCE_TAG:-latest}
